@@ -1,0 +1,95 @@
+# Production stack for a Linux VPS.  See README → Deployment.
+#   cp .env.example .env   (fill in secrets)
+#   docker compose -f docker-compose.prod.yml up -d --build
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-svi_exam}
+      MYSQL_USER: ${MYSQL_USER:-svi}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?}
+    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci']
+    volumes:
+      - mysql-data:/var/lib/mysql
+    # Not published to the host: only reachable on the internal network.
+    networks: [backend]
+    healthcheck:
+      test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -u root -p"$$MYSQL_ROOT_PASSWORD"']
+      interval: 10s
+      retries: 12
+    logging: &logging
+      driver: json-file
+      options: { max-size: '10m', max-file: '5' }
+
+  api:
+    build: { context: ., dockerfile: docker/api.Dockerfile }
+    restart: unless-stopped
+    depends_on:
+      mysql: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: mysql://${MYSQL_USER:-svi}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-svi_exam}
+      APP_ORIGIN: https://${DOMAIN:?}
+      COOKIE_SECURE: 'true'
+      TRUST_PROXY: '1'
+      LOG_LEVEL: info
+      # Chromium only renders server-built HTML with JavaScript and network access disabled;
+      # its own sandbox needs privileges Docker does not grant by default.
+      CHROME_NO_SANDBOX: 'true'
+    volumes:
+      - storage:/app/storage
+    networks: [backend, frontend]
+    logging: *logging
+
+  web:
+    build: { context: ., dockerfile: docker/web.Dockerfile }
+    restart: unless-stopped
+    depends_on: [api]
+    environment:
+      DOMAIN: ${DOMAIN:?}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    networks: [frontend]
+    logging: *logging
+
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
+    logging: *logging
+
+  backup:
+    image: mysql:8.4
+    restart: unless-stopped
+    depends_on:
+      mysql: { condition: service_healthy }
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-svi_exam}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?}
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:?}
+      RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      TZ: Asia/Kathmandu
+    entrypoint: ['/bin/sh', '/backup.sh']
+    volumes:
+      - ./docker/backup/backup.sh:/backup.sh:ro
+      - ./backups:/backups
+    networks: [backend]
+    logging: *logging
+
+networks:
+  backend:
+    internal: true
+  frontend:
+
+volumes:
+  mysql-data:
+  storage:

@@ -1,0 +1,21 @@
+# Development: MySQL only. Run the API and web app with `npm run dev:api` / `npm run dev:web`.
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: devroot
+      MYSQL_DATABASE: svi_exam
+      MYSQL_USER: svi
+      MYSQL_PASSWORD: svi_dev_password
+    ports:
+      - '127.0.0.1:3306:3306'
+    volumes:
+      - mysql-dev:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-psvi_dev_password', '-usvi']
+      interval: 10s
+      retries: 10
+
+volumes:
+  mysql-dev:

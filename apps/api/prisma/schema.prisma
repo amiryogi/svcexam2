@@ -1,0 +1,408 @@
+// SVI Exam App – MySQL schema
+// Conventions: snake_case tables/columns, utf8mb4 (MySQL 8 default), soft delete on students.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Auth & system ─────────────────────────────
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+}
+
+model User {
+  id                Int        @id @default(autoincrement())
+  username          String     @unique @db.VarChar(50)
+  fullName          String     @map("full_name") @db.VarChar(120)
+  email             String?    @db.VarChar(120)
+  passwordHash      String     @map("password_hash") @db.VarChar(255)
+  role              Role       @default(ADMIN)
+  isActive          Boolean    @default(true) @map("is_active")
+  failedLoginCount  Int        @default(0) @map("failed_login_count")
+  lockedUntil       DateTime?  @map("locked_until")
+  lastLoginAt       DateTime?  @map("last_login_at")
+  passwordChangedAt DateTime   @default(now()) @map("password_changed_at")
+  totpSecret        String?    @map("totp_secret") @db.VarChar(255)
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+  sessions          Session[]
+  auditLogs         AuditLog[]
+  marksEntered      Mark[]
+
+  @@map("users")
+}
+
+model Session {
+  id         Int       @id @default(autoincrement())
+  userId     Int       @map("user_id")
+  tokenHash  String    @unique @map("token_hash") @db.Char(64)
+  csrfToken  String    @map("csrf_token") @db.VarChar(64)
+  ip         String?   @db.VarChar(64)
+  userAgent  String?   @map("user_agent") @db.VarChar(255)
+  createdAt  DateTime  @default(now()) @map("created_at")
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?     @map("user_id")
+  action    String   @db.VarChar(40)
+  entity    String   @db.VarChar(40)
+  entityId  String?  @map("entity_id") @db.VarChar(64)
+  before    Json?
+  after     Json?
+  ip        String?  @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+model SchoolSetting {
+  id             Int      @id @default(1)
+  name           String   @db.VarChar(150)
+  address        String?  @db.VarChar(255)
+  phone          String?  @db.VarChar(50)
+  email          String?  @db.VarChar(120)
+  website        String?  @db.VarChar(120)
+  nebSchoolCode  String?  @map("neb_school_code") @db.VarChar(30)
+  logoPath       String?  @map("logo_path") @db.VarChar(255)
+  preparedByName String?  @map("prepared_by_name") @db.VarChar(120)
+  checkedByName  String?  @map("checked_by_name") @db.VarChar(120)
+  principalName  String?  @map("principal_name") @db.VarChar(120)
+  principalTitle String   @default("Principal") @map("principal_title") @db.VarChar(80)
+  gradesheetNote String?  @map("gradesheet_note") @db.Text
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("school_settings")
+}
+
+// ───────────────────────────── Academic setup ─────────────────────────────
+
+model AcademicYear {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique @db.VarChar(20)
+  startDateAd DateTime?    @map("start_date_ad") @db.Date
+  endDateAd   DateTime?    @map("end_date_ad") @db.Date
+  isCurrent   Boolean      @default(false) @map("is_current")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  enrollments Enrollment[]
+  exams       Exam[]
+
+  @@map("academic_years")
+}
+
+model Stream {
+  id               Int               @id @default(autoincrement())
+  code             String            @unique @db.VarChar(20)
+  name             String            @db.VarChar(80)
+  isActive         Boolean           @default(true) @map("is_active")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  curriculumGroups CurriculumGroup[]
+  enrollments      Enrollment[]
+
+  @@map("streams")
+}
+
+enum SubjectCategory {
+  COMPULSORY
+  OPTIONAL
+}
+
+model Subject {
+  id                 Int                      @id @default(autoincrement())
+  grade              Int                      @db.TinyInt
+  name               String                   @db.VarChar(120)
+  shortName          String?                  @map("short_name") @db.VarChar(30)
+  category           SubjectCategory
+  familyCode         String                   @map("family_code") @db.VarChar(20)
+  isActive           Boolean                  @default(true) @map("is_active")
+  createdAt          DateTime                 @default(now()) @map("created_at")
+  updatedAt          DateTime                 @updatedAt @map("updated_at")
+  components         SubjectComponent[]
+  groupMemberships   CurriculumGroupSubject[]
+  enrollmentSubjects EnrollmentSubject[]
+
+  @@unique([grade, familyCode])
+  @@map("subjects")
+}
+
+enum ComponentType {
+  TH
+  IN
+}
+
+model SubjectComponent {
+  id             Int             @id @default(autoincrement())
+  subjectId      Int             @map("subject_id")
+  type           ComponentType
+  nebCode        String          @unique @map("neb_code") @db.VarChar(10)
+  creditHour     Decimal         @map("credit_hour") @db.Decimal(4, 2)
+  fullMark       Decimal         @map("full_mark") @db.Decimal(5, 2)
+  passPercent    Decimal         @default(35) @map("pass_percent") @db.Decimal(5, 2)
+  subject        Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  examComponents ExamComponent[]
+  marks          Mark[]
+
+  @@unique([subjectId, type])
+  @@map("subject_components")
+}
+
+model CurriculumGroup {
+  id        Int                      @id @default(autoincrement())
+  streamId  Int                      @map("stream_id")
+  grade     Int                      @db.TinyInt
+  name      String                   @db.VarChar(80)
+  minSelect Int                      @map("min_select") @db.TinyInt
+  maxSelect Int                      @map("max_select") @db.TinyInt
+  sortOrder Int                      @default(0) @map("sort_order")
+  stream    Stream                   @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  subjects  CurriculumGroupSubject[]
+
+  @@unique([streamId, grade, name])
+  @@map("curriculum_groups")
+}
+
+model CurriculumGroupSubject {
+  groupId   Int             @map("group_id")
+  subjectId Int             @map("subject_id")
+  group     CurriculumGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  subject   Subject         @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+
+  @@id([groupId, subjectId])
+  @@index([subjectId])
+  @@map("curriculum_group_subjects")
+}
+
+// ───────────────────────────── Students & enrollment ─────────────────────────────
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum StudentStatus {
+  ACTIVE
+  PASSED_OUT
+  LEFT
+}
+
+model Student {
+  id                Int           @id @default(autoincrement())
+  admissionNo       String        @unique @map("admission_no") @db.VarChar(30)
+  firstName         String        @map("first_name") @db.VarChar(60)
+  middleName        String?       @map("middle_name") @db.VarChar(60)
+  lastName          String        @map("last_name") @db.VarChar(60)
+  gender            Gender
+  dobAd             DateTime?     @map("dob_ad") @db.Date
+  dobBs             String?       @map("dob_bs") @db.Char(10)
+  nebRegistrationNo String?       @unique @map("neb_registration_no") @db.VarChar(20)
+  guardianName      String?       @map("guardian_name") @db.VarChar(120)
+  guardianPhone     String?       @map("guardian_phone") @db.VarChar(30)
+  phone             String?       @db.VarChar(30)
+  email             String?       @db.VarChar(120)
+  address           String?       @db.VarChar(255)
+  status            StudentStatus @default(ACTIVE)
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+  deletedAt         DateTime?     @map("deleted_at")
+  enrollments       Enrollment[]
+
+  @@index([firstName, lastName])
+  @@index([deletedAt])
+  @@map("students")
+}
+
+model Enrollment {
+  id             Int                 @id @default(autoincrement())
+  studentId      Int                 @map("student_id")
+  academicYearId Int                 @map("academic_year_id")
+  grade          Int                 @db.TinyInt
+  streamId       Int                 @map("stream_id")
+  section        String              @default("A") @db.VarChar(10)
+  rollNo         Int?                @map("roll_no")
+  symbolNo       String?             @map("symbol_no") @db.VarChar(20)
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  student        Student             @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  academicYear   AcademicYear        @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  stream         Stream              @relation(fields: [streamId], references: [id], onDelete: Restrict)
+  subjects       EnrollmentSubject[]
+  marks          Mark[]
+  snapshots      ResultSnapshot[]
+
+  @@unique([studentId, academicYearId])
+  @@unique([academicYearId, grade, section, rollNo])
+  @@unique([academicYearId, grade, symbolNo])
+  @@index([academicYearId, grade, streamId, section])
+  @@map("enrollments")
+}
+
+model EnrollmentSubject {
+  enrollmentId Int        @map("enrollment_id")
+  subjectId    Int        @map("subject_id")
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  subject      Subject    @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+
+  @@id([enrollmentId, subjectId])
+  @@index([subjectId])
+  @@map("enrollment_subjects")
+}
+
+// ───────────────────────────── Grading, exams, marks ─────────────────────────────
+
+model GradeScale {
+  id              Int              @id @default(autoincrement())
+  name            String           @unique @db.VarChar(80)
+  isDefault       Boolean          @default(false) @map("is_default")
+  withholdGpaOnNg Boolean          @default(true) @map("withhold_gpa_on_ng")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  bands           GradeBand[]
+  finalBands      FinalGradeBand[]
+  exams           Exam[]
+
+  @@map("grade_scales")
+}
+
+model GradeBand {
+  id         Int        @id @default(autoincrement())
+  scaleId    Int        @map("scale_id")
+  minPercent Decimal    @map("min_percent") @db.Decimal(5, 2)
+  letter     String     @db.VarChar(4)
+  gradePoint Decimal    @map("grade_point") @db.Decimal(3, 2)
+  scale      GradeScale @relation(fields: [scaleId], references: [id], onDelete: Cascade)
+
+  @@index([scaleId])
+  @@map("grade_bands")
+}
+
+model FinalGradeBand {
+  id        Int        @id @default(autoincrement())
+  scaleId   Int        @map("scale_id")
+  minGp     Decimal    @map("min_gp") @db.Decimal(3, 2)
+  inclusive Boolean
+  letter    String     @db.VarChar(4)
+  scale     GradeScale @relation(fields: [scaleId], references: [id], onDelete: Cascade)
+
+  @@index([scaleId])
+  @@map("final_grade_bands")
+}
+
+enum ExamType {
+  TERMINAL
+  SENDUP
+  FINAL
+}
+
+enum ExamStatus {
+  DRAFT
+  MARK_ENTRY
+  PUBLISHED
+  LOCKED
+}
+
+model Exam {
+  id             Int              @id @default(autoincrement())
+  academicYearId Int              @map("academic_year_id")
+  grade          Int              @db.TinyInt
+  name           String           @db.VarChar(80)
+  type           ExamType
+  /// "Conducted in" year printed on grade sheets; null = derived from the academic year.
+  examYearBs     String?          @map("exam_year_bs") @db.VarChar(4)
+  examYearAd     String?          @map("exam_year_ad") @db.VarChar(4)
+  resultDateBs   String?          @map("result_date_bs") @db.Char(10)
+  issueDateBs    String?          @map("issue_date_bs") @db.Char(10)
+  status         ExamStatus       @default(DRAFT)
+  gradeScaleId   Int              @map("grade_scale_id")
+  remarks        String?          @db.VarChar(500)
+  publishedAt    DateTime?        @map("published_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  academicYear   AcademicYear     @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  gradeScale     GradeScale       @relation(fields: [gradeScaleId], references: [id], onDelete: Restrict)
+  components     ExamComponent[]
+  marks          Mark[]
+  snapshots      ResultSnapshot[]
+
+  @@unique([academicYearId, grade, name])
+  @@map("exams")
+}
+
+/// Per-exam override of a subject component (e.g. terminal theory out of 50, or internal excluded).
+model ExamComponent {
+  examId             Int              @map("exam_id")
+  subjectComponentId Int              @map("subject_component_id")
+  fullMark           Decimal          @map("full_mark") @db.Decimal(5, 2)
+  passPercent        Decimal          @map("pass_percent") @db.Decimal(5, 2)
+  included           Boolean          @default(true)
+  exam               Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
+  subjectComponent   SubjectComponent @relation(fields: [subjectComponentId], references: [id], onDelete: Restrict)
+
+  @@id([examId, subjectComponentId])
+  @@map("exam_components")
+}
+
+enum MarkStatus {
+  PRESENT
+  ABSENT
+  WITHHELD
+}
+
+model Mark {
+  id                 Int              @id @default(autoincrement())
+  examId             Int              @map("exam_id")
+  enrollmentId       Int              @map("enrollment_id")
+  subjectComponentId Int              @map("subject_component_id")
+  marks              Decimal?         @db.Decimal(5, 2)
+  status             MarkStatus       @default(PRESENT)
+  version            Int              @default(1)
+  enteredById        Int?             @map("entered_by_id")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  exam               Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
+  enrollment         Enrollment       @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  subjectComponent   SubjectComponent @relation(fields: [subjectComponentId], references: [id], onDelete: Restrict)
+  enteredBy          User?            @relation(fields: [enteredById], references: [id], onDelete: SetNull)
+
+  @@unique([examId, enrollmentId, subjectComponentId])
+  @@index([examId, subjectComponentId])
+  @@index([enrollmentId])
+  @@map("marks")
+}
+
+/// Immutable copy of a computed grade sheet, written when an exam is published.
+model ResultSnapshot {
+  id           Int        @id @default(autoincrement())
+  examId       Int        @map("exam_id")
+  enrollmentId Int        @map("enrollment_id")
+  payload      Json
+  gpa          Decimal?   @db.Decimal(3, 2)
+  outcome      String     @db.VarChar(12)
+  publishedAt  DateTime   @default(now()) @map("published_at")
+  exam         Exam       @relation(fields: [examId], references: [id], onDelete: Cascade)
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@unique([examId, enrollmentId])
+  @@map("result_snapshots")
+}

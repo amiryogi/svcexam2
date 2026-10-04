@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+uploads/
+storage/
+*.accdb
+*.laccdb
+tools/import-access/out/
+playwright-report/
+test-results/
+.DS_Store
