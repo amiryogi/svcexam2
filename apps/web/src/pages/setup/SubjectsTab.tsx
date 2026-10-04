@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2 } from 'lucide-react';
+import { Copy, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -11,6 +11,7 @@ import { useSubjects } from '../../api/hooks';
 import { Alert, Badge, Button, Card, CardHeader, Checkbox, EmptyState, Field, Input, LoadingBlock, Modal, Select, Table, Td, Th } from '../../components/ui';
 import { titleCase } from '../../lib/format';
 import { applyServerErrors } from '../../lib/forms';
+import { GradeSetupPanel, setupNeeded, useGradeSetupPlan } from './GradeSetupPanel';
 
 type Output = z.output<typeof subjectSchema>;
 
@@ -18,6 +19,9 @@ export function SubjectsTab() {
   const [grade, setGrade] = useState(11);
   const subjects = useSubjects(grade);
   const [editing, setEditing] = useState<SubjectDto | 'new' | null>(null);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const plan = useGradeSetupPlan(11, 12);
+  const needsSetup = setupNeeded(plan.data);
 
   return (
     <Card>
@@ -30,13 +34,24 @@ export function SubjectsTab() {
               <option value={11}>Grade XI</option>
               <option value={12}>Grade XII</option>
             </Select>
+            {grade === 12 && needsSetup && (
+              <Button variant="secondary" onClick={() => setSetupOpen(true)}><Copy className="size-4" /> Set up from Grade XI</Button>
+            )}
             <Button onClick={() => setEditing('new')}><Plus className="size-4" /> Add subject</Button>
           </>
         }
       />
-      {grade === 12 && subjects.data?.length === 0 && (
-        <div className="px-5 pt-4"><Alert tone="blue">Add Grade XII subjects from the official NEB subject code list before promoting students.</Alert></div>
+      {grade === 12 && needsSetup && (
+        <div className="px-5 pt-4">
+          <Alert tone="blue">
+            {plan.data?.rows.length ?? 0} Grade XI subject(s) have no Grade XII version yet. They are needed before students can be promoted.
+            Use <b>Set up from Grade XI</b> to create them automatically (official NEB codes) or manually.
+          </Alert>
+        </div>
       )}
+      <Modal open={setupOpen} onClose={() => setSetupOpen(false)} title="Set up Grade XII subjects" size="xl">
+        {setupOpen && <GradeSetupPanel from={11} to={12} onDone={() => setSetupOpen(false)} onCancel={() => setSetupOpen(false)} />}
+      </Modal>
       {subjects.isPending ? (
         <LoadingBlock />
       ) : !subjects.data?.length ? (

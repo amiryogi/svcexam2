@@ -9,3 +9,4 @@ export * from './schemas/students.js';
 export * from './schemas/enrollment.js';
 export * from './schemas/exams.js';
 export * from './types.js';
+export * from './neb/catalog.js';

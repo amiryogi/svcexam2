@@ -1,10 +1,10 @@
 /**
- * Idempotent seed: grade scale, streams, school settings, Grade 11 NEB subjects and curriculum.
+ * Idempotent seed: grade scale, streams, school settings, Grade 11–12 NEB subjects and curriculum.
  * Usage: npm run db:seed  (production: node dist/scripts/seed.js)
  */
-import { NEB_FINAL_GRADE_BANDS, NEB_GRADE_BANDS } from '@svi/shared';
+import { NEB_FINAL_GRADE_BANDS, NEB_GRADE_BANDS, NEB_SUBJECT_CATALOG } from '@svi/shared';
 import { prisma } from '../lib/prisma.js';
-import { GRADE11_CURRICULUM, GRADE11_SUBJECTS, STREAMS } from './seedData.js';
+import { CURRICULUM, STREAMS } from './seedData.js';
 
 async function main() {
   // Grade scale – only created if missing so admin edits are never overwritten.
@@ -39,46 +39,50 @@ async function main() {
   });
   console.log('✓ school settings');
 
-  for (const s of GRADE11_SUBJECTS) {
-    const existing = await prisma.subject.findUnique({ where: { grade_familyCode: { grade: 11, familyCode: s.familyCode } } });
+  // Grade 11 and 12 subjects from the NEB catalog (codes, credit hours, full marks).
+  for (const c of NEB_SUBJECT_CATALOG) {
+    const existing = await prisma.subject.findUnique({ where: { grade_familyCode: { grade: c.grade, familyCode: c.familyCode } } });
     if (existing) continue;
     await prisma.subject.create({
       data: {
-        grade: 11,
-        familyCode: s.familyCode,
-        name: s.name,
-        category: s.category,
+        grade: c.grade,
+        familyCode: c.familyCode,
+        name: c.name,
+        category: c.category,
         components: {
           create: [
-            { type: 'TH', nebCode: s.th.code, creditHour: s.th.ch, fullMark: s.th.fm },
-            { type: 'IN', nebCode: s.in.code, creditHour: s.in.ch, fullMark: s.in.fm },
+            { type: 'TH', nebCode: c.th.code, creditHour: c.th.creditHour, fullMark: c.th.fullMark },
+            { type: 'IN', nebCode: c.in.code, creditHour: c.in.creditHour, fullMark: c.in.fullMark },
           ],
         },
       },
     });
   }
-  console.log('✓ grade 11 subjects');
+  console.log('✓ grade 11 and 12 subjects');
 
-  const subjects = await prisma.subject.findMany({ where: { grade: 11 } });
-  const byFamily = new Map(subjects.map((s) => [s.familyCode, s.id]));
-  for (const [streamCode, groups] of Object.entries(GRADE11_CURRICULUM)) {
-    const stream = await prisma.stream.findUniqueOrThrow({ where: { code: streamCode } });
-    if (await prisma.curriculumGroup.count({ where: { streamId: stream.id, grade: 11 } })) continue;
-    for (const [i, g] of groups.entries()) {
-      await prisma.curriculumGroup.create({
-        data: {
-          streamId: stream.id,
-          grade: 11,
-          name: g.name,
-          minSelect: g.min,
-          maxSelect: g.max,
-          sortOrder: i,
-          subjects: { create: g.families.map((f) => ({ subjectId: byFamily.get(f)! })) },
-        },
-      });
+  // Both grades use the same subject groups (families) per stream.
+  for (const grade of [11, 12]) {
+    const subjects = await prisma.subject.findMany({ where: { grade } });
+    const byFamily = new Map(subjects.map((s) => [s.familyCode, s.id]));
+    for (const [streamCode, groups] of Object.entries(CURRICULUM)) {
+      const stream = await prisma.stream.findUniqueOrThrow({ where: { code: streamCode } });
+      if (await prisma.curriculumGroup.count({ where: { streamId: stream.id, grade } })) continue;
+      for (const [i, g] of groups.entries()) {
+        await prisma.curriculumGroup.create({
+          data: {
+            streamId: stream.id,
+            grade,
+            name: g.name,
+            minSelect: g.min,
+            maxSelect: g.max,
+            sortOrder: i,
+            subjects: { create: g.families.map((f) => ({ subjectId: byFamily.get(f)! })) },
+          },
+        });
+      }
     }
   }
-  console.log('✓ grade 11 curriculum');
+  console.log('✓ grade 11 and 12 curriculum');
   console.log('Seed complete. Create the first admin with: npm run create-admin');
 }
 

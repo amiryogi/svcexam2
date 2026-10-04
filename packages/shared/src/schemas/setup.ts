@@ -96,3 +96,21 @@ export const gradeScaleSchema = z.object({
     .min(1),
 });
 export type GradeScaleInput = z.input<typeof gradeScaleSchema>;
+
+/** Body of POST /subjects/copy-grade. `items` = manual mode; omitted = auto (official NEB catalog). */
+export const copyGradeSchema = z
+  .object({
+    from: gradeLevelSchema,
+    to: gradeLevelSchema,
+    items: z
+      .array(
+        z.object({
+          familyCode: z.string().trim().toUpperCase().min(2).max(20),
+          name: requiredText(120),
+          components: z.array(subjectComponentSchema.omit({ id: true })).min(1).max(2),
+        }),
+      )
+      .optional(),
+  })
+  .refine((v) => v.from !== v.to, { message: 'Choose two different grades', path: ['to'] });
+export type CopyGradeInput = z.input<typeof copyGradeSchema>;

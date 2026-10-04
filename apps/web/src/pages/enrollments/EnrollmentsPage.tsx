@@ -3,11 +3,12 @@ import { ArrowUpRight, Hash, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
-import { api } from '../../api/client';
+import { api, ApiError } from '../../api/client';
 import { useAcademicYears, useStreams, useSubjects } from '../../api/hooks';
 import type { Enrollment } from '../../api/types';
-import { Alert, Button, Card, ConfirmDialog, EmptyState, ErrorBlock, Field, Input, LoadingBlock, Modal, PageHeader, Select, Table, Td, Th } from '../../components/ui';
+import { Alert, Button, Card, cn, ConfirmDialog, EmptyState, ErrorBlock, Field, Input, LoadingBlock, Modal, PageHeader, Select, Table, Td, Th } from '../../components/ui';
 import { toastError } from '../../lib/forms';
+import { GradeSetupPanel, setupNeeded, useGradeSetupPlan } from '../setup/GradeSetupPanel';
 import { EnrollDialog } from './EnrollDialog';
 
 export function EnrollmentsPage() {
@@ -175,10 +176,21 @@ function PromoteDialog({ open, onClose, fromYearId }: { open: boolean; onClose: 
   const qc = useQueryClient();
   const years = useAcademicYears();
   const streams = useStreams();
-  const [from, setFrom] = useState<number | null>(fromYearId);
-  const [to, setTo] = useState<number | null>(null);
+  const [pickedFrom, setFrom] = useState<number | null>(null);
+  const [pickedTo, setTo] = useState<number | null>(null);
+  // Defaults: promote FROM the year students are leaving INTO the next newer year.
+  // Years arrive newest first; if the page shows the newest year, start from the one before it.
+  const ordered = years.data ?? [];
+  const pageIndex = ordered.findIndex((y) => y.id === fromYearId);
+  const defaultFromIndex = pageIndex <= 0 && ordered.length > 1 ? 1 : Math.max(pageIndex, 0);
+  const from = pickedFrom ?? ordered[defaultFromIndex]?.id ?? null;
+  const fromIndex = ordered.findIndex((y) => y.id === from);
+  const to = pickedTo ?? (fromIndex > 0 ? ordered[fromIndex - 1]!.id : null);
   const [streamId, setStreamId] = useState('');
   const [report, setReport] = useState<{ promoted: number; skipped: { name: string; reason: string }[] } | null>(null);
+  const [problem, setProblem] = useState<{ message: string; setup?: string } | null>(null);
+  const plan = useGradeSetupPlan(11, 12);
+  const needsSetup = setupNeeded(plan.data);
 
   const promote = useMutation({
     mutationFn: () =>
@@ -186,12 +198,18 @@ function PromoteDialog({ open, onClose, fromYearId }: { open: boolean; onClose: 
         method: 'POST',
         body: { fromAcademicYearId: from, toAcademicYearId: to, streamId: streamId ? Number(streamId) : undefined },
       }),
+    onMutate: () => setProblem(null),
     onSuccess: async (r) => {
       setReport(r);
-      toast.success(`Promoted ${r.promoted} student(s)`);
+      if (r.promoted > 0) toast.success(`Promoted ${r.promoted} student(s)`);
+      else toast.warning('No students were promoted – see the reasons below');
       await qc.invalidateQueries({ queryKey: ['enrollments'] });
     },
-    onError: toastError,
+    onError: (e) => {
+      if (e instanceof ApiError && (e.status === 409 || e.status === 400)) {
+        setProblem({ message: e.message, setup: (e.details as { setup?: string } | undefined)?.setup });
+      } else toastError(e);
+    },
   });
 
   return (
@@ -199,14 +217,26 @@ function PromoteDialog({ open, onClose, fromYearId }: { open: boolean; onClose: 
       open={open}
       onClose={onClose}
       title="Promote Grade XI to Grade XII"
+      size={needsSetup ? 'xl' : 'md'}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Close</Button>
-          {!report && <Button disabled={!from || !to || from === to} loading={promote.isPending} onClick={() => promote.mutate()}>Promote</Button>}
+          {!report && !needsSetup && (
+            <Button disabled={!from || !to || from === to || plan.isPending} loading={promote.isPending} onClick={() => promote.mutate()}>Promote</Button>
+          )}
         </>
       }
     >
-      {report ? (
+      {needsSetup && !report ? (
+        <div className="space-y-4">
+          <Steps current={1} />
+          <p className="text-sm text-slate-600">
+            Grade XII subjects are not set up yet. Students' Grade XI subjects are moved to these Grade XII subjects when they are promoted.
+            Choose <b>Auto</b> to use the official NEB codes, or <b>Manual</b> to enter the codes, credit hours and full marks for theory and practical yourself.
+          </p>
+          <GradeSetupPanel from={11} to={12} />
+        </div>
+      ) : report ? (
         <div className="space-y-3 text-sm">
           <Alert tone="green">{report.promoted} student(s) enrolled in Grade XII.</Alert>
           {report.skipped.length > 0 && (
@@ -218,10 +248,21 @@ function PromoteDialog({ open, onClose, fromYearId }: { open: boolean; onClose: 
         </div>
       ) : (
         <div className="space-y-4">
+          {plan.data && plan.data.from === 11 && <Steps current={2} />}
           <p className="text-sm text-slate-600">
             Active Grade XI students are enrolled in Grade XII of the target year with the same stream, section and roll number.
             Subjects are matched by family code, so Grade XII subjects must be set up first.
           </p>
+          {problem && (
+            <Alert tone="red">
+              <p>{problem.message}</p>
+              {problem.setup && (
+                <Link className="mt-2 inline-block font-medium underline" to={`/setup?tab=${problem.setup}`} onClick={onClose}>
+                  Open Setup → {problem.setup === 'curriculum' ? 'Curriculum' : 'Subjects'}
+                </Link>
+              )}
+            </Alert>
+          )}
           <div className="grid gap-4 sm:grid-cols-3">
             <Field label="From year">
               <Select value={from ?? ''} onChange={(e) => setFrom(Number(e.target.value))}>
@@ -244,5 +285,23 @@ function PromoteDialog({ open, onClose, fromYearId }: { open: boolean; onClose: 
         </div>
       )}
     </Modal>
+  );
+}
+
+function Steps({ current }: { current: 1 | 2 }) {
+  const step = (n: 1 | 2, label: string) => (
+    <div className={cn('flex items-center gap-2 text-sm', current === n ? 'font-semibold text-brand-800' : 'text-slate-400')}>
+      <span className={cn('flex size-6 items-center justify-center rounded-full text-xs', current === n ? 'bg-brand-700 text-white' : current > n ? 'bg-green-600 text-white' : 'bg-slate-200 text-slate-500')}>
+        {current > n ? '✓' : n}
+      </span>
+      {label}
+    </div>
+  );
+  return (
+    <div className="flex items-center gap-3">
+      {step(1, 'Set up Grade XII subjects')}
+      <div className="h-px w-8 bg-slate-300" />
+      {step(2, 'Promote students')}
+    </div>
   );
 }

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import {
+  copyGradeSchema,
   curriculumQuery,
   curriculumSchema,
   gradeLevelSchema,
@@ -12,6 +13,7 @@ import {
 import { ctxOf, recordAudit } from '../../lib/audit.js';
 import { badRequest, parse } from '../../lib/errors.js';
 import { n, prisma } from '../../lib/prisma.js';
+import { applyGradeSetup, buildGradeSetupPlan } from './gradeSetup.service.js';
 import { loadCurriculum, subjectInclude, toSubjectDto } from './subjects.service.js';
 
 // ───────── Subjects ─────────
@@ -75,6 +77,18 @@ subjectsRouter.put('/:id', async (req, res) => {
     return after;
   });
   res.json(toSubjectDto(subject));
+});
+
+/** Which subjects the next grade still needs, pre-filled from the official NEB catalog. */
+subjectsRouter.get('/grade-setup-plan', async (req, res) => {
+  const { from, to } = parse(z.object({ from: gradeLevelSchema, to: gradeLevelSchema }), req.query);
+  res.json(await buildGradeSetupPlan(prisma, from, to));
+});
+
+/** Creates the next grade's subjects (auto = NEB catalog, manual = admin's values) and copies curricula. */
+subjectsRouter.post('/copy-grade', async (req, res) => {
+  const input = parse(copyGradeSchema, req.body);
+  res.json(await prisma.$transaction((tx) => applyGradeSetup(tx, input, ctxOf(req))));
 });
 
 // ───────── Curriculum (subject groups per stream & grade) ─────────

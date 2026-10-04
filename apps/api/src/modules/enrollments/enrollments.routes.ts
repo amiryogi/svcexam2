@@ -192,6 +192,26 @@ enrollmentsRouter.post('/promote', async (req, res) => {
       const grade12 = await tx.subject.findMany({ where: { grade: 12, isActive: true } });
       const byFamily = new Map(grade12.map((s) => [s.familyCode, s.id]));
 
+      // Fail early with one clear message instead of skipping every student for the same reason.
+      if (sources.length === 0) throw badRequest('No active Grade XI students match this selection');
+      if (grade12.length === 0) {
+        throw conflict('No Grade XII subjects are set up yet. Go to Setup → Subjects → Grade XII and use "Copy from Grade XI", then check the NEB codes.', {
+          setup: 'subjects',
+        });
+      }
+      const streamIds = [...new Set(sources.map((e) => e.streamId))];
+      const missingCurriculum: string[] = [];
+      for (const streamId of streamIds) {
+        if (!(await tx.curriculumGroup.count({ where: { streamId, grade: 12 } }))) {
+          missingCurriculum.push((await tx.stream.findUniqueOrThrow({ where: { id: streamId } })).name);
+        }
+      }
+      if (missingCurriculum.length) {
+        throw conflict(`No Grade XII curriculum is set up for: ${missingCurriculum.join(', ')}. Configure it under Setup → Curriculum (Grade XII).`, {
+          setup: 'curriculum',
+        });
+      }
+
       const promoted: number[] = [];
       const skipped: { studentId: number; name: string; reason: string }[] = [];
       for (const e of sources) {

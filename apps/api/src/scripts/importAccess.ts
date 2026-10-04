@@ -70,7 +70,13 @@ async function main() {
   try {
     await prisma.$transaction(
       async (tx) => {
-        const year = await tx.academicYear.upsert({ where: { name: args.year! }, create: { name: args.year! }, update: {} });
+        // A newly created year becomes the current one when no year is current yet.
+        const hasCurrent = (await tx.academicYear.count({ where: { isCurrent: true } })) > 0;
+        const year = await tx.academicYear.upsert({
+          where: { name: args.year! },
+          create: { name: args.year!, isCurrent: !hasCurrent },
+          update: {},
+        });
         const exam = await tx.exam.upsert({
           where: { academicYearId_grade_name: { academicYearId: year.id, grade, name: args.exam! } },
           create: {
