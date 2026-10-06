@@ -17,7 +17,8 @@ export const examSchema = z.object({
 });
 export type ExamInput = z.input<typeof examSchema>;
 
-export const examUpdateSchema = examSchema.omit({ academicYearId: true, grade: true }).partial();
+/** Year and grade can only change while the exam has no marks (checked by the API). */
+export const examUpdateSchema = examSchema.partial();
 export type ExamUpdateInput = z.input<typeof examUpdateSchema>;
 
 /** Fields that only affect how grade sheets are printed; editable even after publishing. */

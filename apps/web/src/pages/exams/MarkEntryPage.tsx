@@ -14,7 +14,7 @@ import {
   type MarkStatus,
 } from '@svi/shared';
 import { api } from '../../api/client';
-import type { GradeScale } from '../../api/types';
+import type { Enrollment, GradeScale } from '../../api/types';
 import { useExams, useStreams } from '../../api/hooks';
 import { Alert, Badge, Button, Card, EmptyState, ErrorBlock, Field, Input, LoadingBlock, PageHeader, Select, Table, Td, Th } from '../../components/ui';
 import { gradeLabel } from '../../lib/format';
@@ -239,7 +239,7 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
         </div>
       )}
       {rows.length === 0 ? (
-        <EmptyState title="No students take this subject in the selected class" />
+        <EmptyClass exam={grid.data.exam} streamId={streamId} section={section} />
       ) : (
         <Table>
           <thead className="bg-slate-50">
@@ -318,5 +318,38 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
         </Table>
       )}
     </Card>
+  );
+}
+
+/** Explains an empty mark grid: wrong exam grade/year (nobody enrolled) vs. nobody taking this subject. */
+function EmptyClass({ exam, streamId, section }: { exam: MarksGrid['exam']; streamId: string; section: string }) {
+  const enrolled = useQuery({
+    queryKey: ['enrollments', exam.academicYearId, exam.grade, 'count'],
+    queryFn: () => api<Enrollment[]>('/enrollments', { query: { academicYearId: exam.academicYearId, grade: exam.grade } }),
+  });
+  if (enrolled.isPending) return <LoadingBlock />;
+  if (enrolled.data && enrolled.data.length === 0) {
+    return (
+      <div className="p-5">
+        <Alert>
+          <p className="font-medium">
+            "{exam.name}" is set up for {gradeLabel(exam.grade)} in {exam.academicYear}, but no {gradeLabel(exam.grade)} students are enrolled
+            in {exam.academicYear}.
+          </p>
+          <p className="mt-1">
+            If this exam is meant for another grade, open the exam and change its grade (possible while no marks are entered).
+          </p>
+          <Link to={`/exams/${exam.id}`} className="mt-2 inline-block font-medium underline">
+            Open {exam.name}
+          </Link>
+        </Alert>
+      </div>
+    );
+  }
+  return (
+    <EmptyState
+      title="No students take this subject in the selected class"
+      description={streamId || section ? 'Try clearing the stream or section filter.' : undefined}
+    />
   );
 }

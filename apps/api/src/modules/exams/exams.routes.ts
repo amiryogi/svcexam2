@@ -80,6 +80,16 @@ examsRouter.put('/:id', async (req, res) => {
       data = Object.fromEntries(Object.entries(input).filter(([k]) => isPrintField(k)));
     } else {
       assertStatus(before, ['DRAFT', 'MARK_ENTRY'], 'edit the exam');
+      const moving =
+        (input.grade !== undefined && input.grade !== before.grade) ||
+        (input.academicYearId !== undefined && input.academicYearId !== before.academicYearId);
+      if (moving) {
+        // Marks belong to a year's class and a grade's subjects, so they cannot follow the exam.
+        const marks = await tx.mark.count({ where: { examId: id } });
+        if (marks) throw conflict(`This exam already has ${marks} mark(s); its year and grade can no longer change`);
+        // Full-mark overrides refer to the old grade's subjects.
+        await tx.examComponent.deleteMany({ where: { examId: id } });
+      }
     }
     const updated = await tx.exam.update({ where: { id }, data, include: { academicYear: true } });
     await recordAudit(tx, ctxOf(req), { action: 'UPDATE', entity: 'exam', entityId: id, before: toExamDto(before), after: toExamDto(updated) });
