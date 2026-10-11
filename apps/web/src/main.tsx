@@ -5,6 +5,7 @@ import { RouterProvider } from 'react-router';
 import { Toaster } from 'sonner';
 import { ApiError } from './api/client';
 import { AuthProvider } from './auth/AuthProvider';
+import { BrandingHead } from './components/BrandingHead';
 import { router } from './router';
 import './index.css';
 
@@ -22,6 +23,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <BrandingHead />
         <RouterProvider router={router} />
         <Toaster richColors position="top-right" closeButton />
       </AuthProvider>

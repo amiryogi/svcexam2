@@ -39,6 +39,15 @@ export const promoteSchema = z.object({
 });
 export type PromoteInput = z.input<typeof promoteSchema>;
 
+/** Marks the Grade XII students of a year who passed its Final exam as passed out. */
+export const passOutSchema = z.object({
+  academicYearId: idSchema,
+  streamId: idSchema.optional(),
+  section: z.string().trim().max(10).optional(),
+  enrollmentIds: z.array(idSchema).optional(),
+});
+export type PassOutInput = z.input<typeof passOutSchema>;
+
 export const bulkSymbolSchema = z.object({
   items: z
     .array(z.object({ enrollmentId: idSchema, symbolNo: optionalText(20) }))

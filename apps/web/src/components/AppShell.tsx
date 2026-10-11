@@ -1,7 +1,6 @@
 import clsx from 'clsx';
 import {
   BookOpenCheck,
-  ClipboardList,
   FileClock,
   GraduationCap,
   LayoutDashboard,
@@ -14,8 +13,9 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router';
-import { useCurrentYear, useSettings } from '../api/hooks';
+import { useBranding, useCurrentYear } from '../api/hooks';
 import { useAuth } from '../auth/AuthProvider';
+import { initials, SchoolLogo } from './SchoolLogo';
 
 const nav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -29,20 +29,21 @@ const nav = [
 
 export function AppShell() {
   const { user, logout } = useAuth();
-  const settings = useSettings();
+  const branding = useBranding();
+  const schoolName = branding.data?.name ?? 'School';
   const { current } = useCurrentYear();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
 
   const sidebar = (
     <nav className="flex h-full flex-col bg-brand-900 text-brand-100">
-      <div className="flex items-center gap-2 px-5 py-5">
-        <ClipboardList className="size-7 text-brand-100" />
-        <div className="leading-tight">
-          <p className="text-sm font-semibold text-white">{settings.data?.name ?? 'School'}</p>
+      <NavLink to="/" onClick={() => setOpen(false)} className="flex items-center gap-3 px-4 py-5">
+        <SchoolLogo size="md" />
+        <div className="min-w-0 leading-tight">
+          <p className="text-sm font-semibold text-white">{schoolName}</p>
           <p className="text-xs text-brand-100/70">+2 Exam Management</p>
         </div>
-      </div>
+      </NavLink>
       <div className="flex-1 space-y-0.5 px-3">
         {nav.map(({ to, label, icon: Icon, end }) => (
           <NavLink
@@ -82,7 +83,12 @@ export function AppShell() {
           <button className="rounded p-1.5 text-slate-600 hover:bg-slate-100 lg:hidden" onClick={() => setOpen(true)} aria-label="Open menu">
             <Menu className="size-5" />
           </button>
-          <div className="text-sm text-slate-500">
+          {/* On small screens the sidebar is hidden, so show the school here. */}
+          <NavLink to="/" className="flex min-w-0 items-center gap-2 lg:hidden">
+            <SchoolLogo size="sm" />
+            <span className="truncate text-sm font-semibold text-slate-800">{initials(schoolName)}</span>
+          </NavLink>
+          <div className="hidden text-sm text-slate-500 sm:block">
             Academic year{' '}
             <span className="font-semibold text-slate-800">{current?.name ?? 'not set'}</span>
           </div>

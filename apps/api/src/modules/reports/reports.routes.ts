@@ -1,4 +1,4 @@
-import { Router, type Response } from 'express';
+import { Router, type RequestHandler, type Response } from 'express';
 import ExcelJS from 'exceljs';
 import { z } from 'zod';
 import { formatGp, idSchema, resultsQuery } from '@svi/shared';
@@ -20,13 +20,23 @@ const sheetQuery = resultsQuery.extend({ enrollmentId: idSchema.optional() });
 const safeName = (s: string) => s.replace(/[^\w.-]+/g, '_').slice(0, 80);
 
 function sendFile(res: Response, buf: Buffer, mime: string, filename: string) {
+  // ?as=base64: the web app fetches reports with fetch(). Microsoft Edge recognises PDF bytes in a
+  // fetched response (whatever the Content-Type) and hands the page an empty body. Wrapping the file
+  // as base64 in JSON avoids that; the app decodes it. Direct links still get the raw file.
+  if (res.req.query.as === 'base64') {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ filename: safeName(filename), mime, data: buf.toString('base64') });
+    return;
+  }
   res.setHeader('Content-Type', mime);
   res.setHeader('Content-Disposition', `attachment; filename="${safeName(filename)}"`);
   res.setHeader('Cache-Control', 'no-store');
   res.send(buf);
 }
 
-reportsRouter.get('/exams/:examId/gradesheets.pdf', async (req, res) => {
+// Report URLs without a file extension: browsers / security software may intercept requests ending in .pdf.
+// The old '.pdf' / '.xlsx' paths stay for compatibility.
+reportsRouter.get(['/exams/:examId/gradesheets', '/exams/:examId/gradesheets.pdf'], async (req, res) => {
   const { examId } = parse(examParams, req.params);
   const q = parse(sheetQuery, req.query);
   const exam = await getExam(prisma, examId);
@@ -56,16 +66,16 @@ async function ledgerData(examId: number, q: z.output<typeof resultsQuery>) {
   return { exam, rows, subtitle };
 }
 
-reportsRouter.get('/exams/:examId/ledger.pdf', async (req, res) => {
+const ledgerPdf: RequestHandler = async (req, res) => {
   const { examId } = parse(examParams, req.params);
   const q = parse(resultsQuery, req.query);
   const { exam, rows, subtitle } = await ledgerData(examId, q);
   const school = toSchoolInfo(await getSettingsRow());
   const pdf = await renderPdf(ledgerHtml(school, toExamDto(exam), rows, subtitle), { landscape: true });
   sendFile(res, pdf, 'application/pdf', `ledger_${exam.name}_G${exam.grade}.pdf`);
-});
+};
 
-reportsRouter.get('/exams/:examId/ledger.xlsx', async (req, res) => {
+const ledgerXlsx: RequestHandler = async (req, res) => {
   const { examId } = parse(examParams, req.params);
   const q = parse(resultsQuery, req.query);
   const { exam, rows, subtitle } = await ledgerData(examId, q);
@@ -107,4 +117,10 @@ reportsRouter.get('/exams/:examId/ledger.xlsx', async (req, res) => {
   ws.getColumn(4).width = 28;
   const buf = Buffer.from(await wb.xlsx.writeBuffer());
   sendFile(res, buf, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', `ledger_${exam.name}_G${exam.grade}.xlsx`);
-});
+};
+
+reportsRouter.get('/exams/:examId/ledger.pdf', ledgerPdf);
+reportsRouter.get('/exams/:examId/ledger.xlsx', ledgerXlsx);
+reportsRouter.get('/exams/:examId/ledger', (req, res, next) =>
+  req.query.format === 'xlsx' ? ledgerXlsx(req, res, next) : ledgerPdf(req, res, next),
+);

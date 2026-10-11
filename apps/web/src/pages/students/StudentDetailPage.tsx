@@ -34,7 +34,7 @@ function EnrollmentExams({ enrollment }: { enrollment: StudentDetail['enrollment
           variant="secondary"
           title={e.status === 'PUBLISHED' || e.status === 'LOCKED' ? 'Download grade sheet' : 'Provisional grade sheet'}
           onClick={() =>
-            downloadFile(`/reports/exams/${e.id}/gradesheets.pdf`, { enrollmentId: enrollment.id }).catch(toastError)
+            downloadFile(`/reports/exams/${e.id}/gradesheets`, { enrollmentId: enrollment.id }).catch(toastError)
           }
         >
           <FileDown className="size-3.5" /> {e.name}

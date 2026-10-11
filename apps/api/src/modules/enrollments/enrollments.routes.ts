@@ -8,6 +8,8 @@ import {
   enrollmentUpdateSchema,
   fullName,
   idParams,
+  isLaterAcademicYear,
+  passOutSchema,
   promoteSchema,
 } from '@svi/shared';
 import { ctxOf, recordAudit } from '../../lib/audit.js';
@@ -15,6 +17,7 @@ import { badRequest, conflict, notFound, parse } from '../../lib/errors.js';
 import { prisma, type Db } from '../../lib/prisma.js';
 import { validateSubjectSelection } from '../subjects/curriculum.logic.js';
 import { loadGroupRules } from '../subjects/subjects.service.js';
+import { loadFinalResults } from './finalResults.js';
 
 export const enrollmentsRouter = Router();
 
@@ -171,13 +174,22 @@ enrollmentsRouter.delete('/:id', async (req, res) => {
   res.status(204).end();
 });
 
-/** Grade 11 -> Grade 12: same stream/section/roll no; subjects mapped by family code. */
+/** Grade 11 -> Grade 12 for students who passed the Grade XI Final: same stream/section/roll no; subjects mapped by family code. */
 enrollmentsRouter.post('/promote', async (req, res) => {
   const input: z.output<typeof promoteSchema> = parse(promoteSchema, req.body);
   if (input.fromAcademicYearId === input.toAcademicYearId) throw badRequest('Choose a different target year');
 
   const report = await prisma.$transaction(
     async (tx) => {
+      const [fromYear, toYear] = await Promise.all([
+        tx.academicYear.findUnique({ where: { id: input.fromAcademicYearId } }),
+        tx.academicYear.findUnique({ where: { id: input.toAcademicYearId } }),
+      ]);
+      if (!fromYear || !toYear) throw notFound('Academic year');
+      if (!isLaterAcademicYear(toYear, fromYear)) {
+        throw badRequest(`Students can only be promoted into a later academic year (not from ${fromYear.name} into ${toYear.name})`);
+      }
+
       const sources = await tx.enrollment.findMany({
         where: {
           academicYearId: input.fromAcademicYearId,
@@ -194,6 +206,11 @@ enrollmentsRouter.post('/promote', async (req, res) => {
 
       // Fail early with one clear message instead of skipping every student for the same reason.
       if (sources.length === 0) throw badRequest('No active Grade XI students match this selection');
+      // Only students who passed the Grade XI Final move up, so that result must exist.
+      const finals = await loadFinalResults(tx, fromYear.id, 11, sources.map((e) => e.id));
+      if (!finals.published) {
+        throw conflict(`Publish the ${finals.exam} exam of ${fromYear.name} first. Only students who passed it are promoted.`);
+      }
       if (grade12.length === 0) {
         throw conflict('No Grade XII subjects are set up yet. Go to Setup → Subjects → Grade XII and use "Copy from Grade XI", then check the NEB codes.', {
           setup: 'subjects',
@@ -212,15 +229,41 @@ enrollmentsRouter.post('/promote', async (req, res) => {
         });
       }
 
-      const promoted: number[] = [];
+      // Everything else these students are enrolled in (to catch double Grade XII and repeaters).
+      const otherEnrollments = await tx.enrollment.findMany({
+        where: { studentId: { in: sources.map((e) => e.studentId) }, id: { notIn: sources.map((e) => e.id) } },
+        include: { academicYear: true },
+      });
+      // Roll numbers already used in the target year's Grade XII, per section.
+      const takenRolls = new Set(
+        (await tx.enrollment.findMany({ where: { academicYearId: input.toAcademicYearId, grade: 12, rollNo: { not: null } } })).map(
+          (e) => `${e.section}|${e.rollNo}`,
+        ),
+      );
+      const promoted: { studentId: number; name: string }[] = [];
       const skipped: { studentId: number; name: string; reason: string }[] = [];
+      const notes: { studentId: number; name: string; note: string }[] = [];
       for (const e of sources) {
         const name = fullName(e.student);
-        const exists = await tx.enrollment.findUnique({
-          where: { studentId_academicYearId: { studentId: e.studentId, academicYearId: input.toAcademicYearId } },
-        });
-        if (exists) {
-          skipped.push({ studentId: e.studentId, name, reason: 'Already enrolled in the target year' });
+        const others = otherEnrollments.filter((o) => o.studentId === e.studentId);
+        const inTarget = others.find((o) => o.academicYearId === input.toAcademicYearId);
+        if (inTarget) {
+          skipped.push({ studentId: e.studentId, name, reason: `Already enrolled in ${toYear.name} (Grade ${inTarget.grade})` });
+          continue;
+        }
+        const grade12 = others.find((o) => o.grade === 12);
+        if (grade12) {
+          skipped.push({ studentId: e.studentId, name, reason: `Already in Grade XII (${grade12.academicYear.name})` });
+          continue;
+        }
+        const laterGrade11 = others.find((o) => o.grade === 11 && isLaterAcademicYear(o.academicYear, fromYear));
+        if (laterGrade11) {
+          skipped.push({ studentId: e.studentId, name, reason: `Repeating Grade XI in ${laterGrade11.academicYear.name}; promote from that year instead` });
+          continue;
+        }
+        const failed = finals.notPassedReason(e.id);
+        if (failed) {
+          skipped.push({ studentId: e.studentId, name, reason: `${failed}. Stays in Grade XI.` });
           continue;
         }
         const missing = e.subjects.filter((s) => !byFamily.has(s.subject.familyCode));
@@ -238,27 +281,93 @@ enrollmentsRouter.post('/promote', async (req, res) => {
           skipped.push({ studentId: e.studentId, name, reason: problems.join('; ') });
           continue;
         }
-        const created = await tx.enrollment.create({
+        // Keep the roll number unless another Grade XII student in that section already has it.
+        let rollNo = e.rollNo;
+        if (rollNo !== null && takenRolls.has(`${e.section}|${rollNo}`)) {
+          notes.push({ studentId: e.studentId, name, note: `Roll no. ${rollNo} in section ${e.section} is already taken in ${toYear.name}; promoted without a roll number` });
+          rollNo = null;
+        }
+        if (rollNo !== null) takenRolls.add(`${e.section}|${rollNo}`);
+        await tx.enrollment.create({
           data: {
             studentId: e.studentId,
             academicYearId: input.toAcademicYearId,
             grade: 12,
             streamId: e.streamId,
             section: e.section,
-            rollNo: e.rollNo,
+            rollNo,
             subjects: { create: subjectIds.map((subjectId) => ({ subjectId })) },
           },
         });
-        promoted.push(created.id);
+        promoted.push({ studentId: e.studentId, name });
       }
       await recordAudit(tx, ctxOf(req), {
         action: 'PROMOTE',
         entity: 'enrollment',
-        after: { ...input, promoted: promoted.length, skipped: skipped.length },
+        after: { ...input, from: fromYear.name, to: toYear.name, promoted: promoted.length, skipped: skipped.length, students: promoted, skippedStudents: skipped, notes },
       });
-      return { promoted: promoted.length, skipped };
+      return { promoted: promoted.length, skipped, notes, toYear: { id: toYear.id, name: toYear.name, isCurrent: toYear.isCurrent } };
     },
-    { timeout: 60_000 },
+    { timeout: 120_000 },
+  );
+  res.json(report);
+});
+
+/** Grade 12 students who passed the year's Final exam -> student status PASSED_OUT. Others stay ACTIVE. */
+enrollmentsRouter.post('/pass-out', async (req, res) => {
+  const input = parse(passOutSchema, req.body);
+  const report = await prisma.$transaction(
+    async (tx) => {
+      const year = await tx.academicYear.findUnique({ where: { id: input.academicYearId } });
+      if (!year) throw notFound('Academic year');
+      const sources = await tx.enrollment.findMany({
+        where: {
+          academicYearId: year.id,
+          grade: 12,
+          streamId: input.streamId,
+          section: input.section,
+          ...(input.enrollmentIds && { id: { in: input.enrollmentIds } }),
+          student: { deletedAt: null },
+        },
+        include: { student: true },
+      });
+      if (sources.length === 0) throw badRequest(`No Grade XII students in ${year.name} match this selection`);
+      const finals = await loadFinalResults(tx, year.id, 12, sources.map((e) => e.id));
+      if (!finals.published) {
+        throw conflict(`Publish the ${finals.exam} exam of ${year.name} first. Only students who passed it are marked as passed out.`);
+      }
+
+      const passedOut: { studentId: number; name: string }[] = [];
+      const skipped: { studentId: number; name: string; reason: string }[] = [];
+      let alreadyPassedOut = 0;
+      for (const e of sources) {
+        const name = fullName(e.student);
+        if (e.student.status === 'PASSED_OUT') {
+          alreadyPassedOut++;
+          continue;
+        }
+        if (e.student.status === 'LEFT') {
+          skipped.push({ studentId: e.studentId, name, reason: 'Marked as Left' });
+          continue;
+        }
+        const failed = finals.notPassedReason(e.id);
+        if (failed) {
+          skipped.push({ studentId: e.studentId, name, reason: `${failed}. Stays Active.` });
+          continue;
+        }
+        passedOut.push({ studentId: e.studentId, name });
+      }
+      if (passedOut.length) {
+        await tx.student.updateMany({ where: { id: { in: passedOut.map((p) => p.studentId) } }, data: { status: 'PASSED_OUT' } });
+      }
+      await recordAudit(tx, ctxOf(req), {
+        action: 'PASS_OUT',
+        entity: 'student',
+        after: { ...input, year: year.name, passedOut: passedOut.length, alreadyPassedOut, students: passedOut, skippedStudents: skipped },
+      });
+      return { passedOut: passedOut.length, alreadyPassedOut, skipped, year: { id: year.id, name: year.name } };
+    },
+    { timeout: 120_000 },
   );
   res.json(report);
 });

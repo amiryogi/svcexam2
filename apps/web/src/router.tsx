@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate, Outlet, useLocation } from 'react-router';
 import { useAuth } from './auth/AuthProvider';
 import { AppShell } from './components/AppShell';
+import { SchoolLogo } from './components/SchoolLogo';
 import { LoadingBlock } from './components/ui';
 import { AuditPage } from './pages/AuditPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -19,7 +20,14 @@ import { StudentsPage } from './pages/students/StudentsPage';
 function RequireAuth() {
   const { user, loading } = useAuth();
   const location = useLocation();
-  if (loading) return <LoadingBlock label="Checking session…" />;
+  if (loading) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-50">
+        <SchoolLogo size="lg" />
+        <LoadingBlock label="Checking session…" />
+      </div>
+    );
+  }
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   return <Outlet />;
 }

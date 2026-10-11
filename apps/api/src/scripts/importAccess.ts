@@ -12,7 +12,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { formatGp } from '@svi/shared';
+import { academicYearNameSchema, formatGp } from '@svi/shared';
 import { prisma } from '../lib/prisma.js';
 import { computeExamResults, publishExam } from '../modules/results/results.service.js';
 import { validateSubjectSelection } from '../modules/subjects/curriculum.logic.js';
@@ -40,6 +40,9 @@ class DryRunRollback extends Error {}
 async function main() {
   if (!args.year) {
     throw new Error('Required: --year <academic year, e.g. 2081>');
+  }
+  if (!academicYearNameSchema.safeParse(args.year).success) {
+    throw new Error(`--year must be a 4-digit B.S. year such as 2081 (got "${args.year}")`);
   }
   const grade = Number(args.grade);
   if (grade !== 11 && grade !== 12) throw new Error('--grade must be 11 or 12');

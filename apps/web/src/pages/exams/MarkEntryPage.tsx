@@ -148,12 +148,14 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
   const savable = dirtyIds.filter((id) => !invalidIds.includes(id));
 
   const save = useMutation({
-    mutationFn: (ids: number[]) =>
-      api<MarksSaveResult>(`/exams/${examId}/marks`, {
+    mutationFn: async (ids: number[]) => {
+      // Remember exactly what was sent, so typing that happens while the request is in flight is kept.
+      const sent = new Map(ids.map((id) => [id, { ...edits[id]! }]));
+      const result = await api<MarksSaveResult>(`/exams/${examId}/marks`, {
         method: 'PUT',
         body: {
           items: ids.map((id) => {
-            const e = edits[id]!;
+            const e = sent.get(id)!;
             return {
               enrollmentId: id,
               subjectComponentId: componentId,
@@ -163,15 +165,46 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
             };
           }),
         },
-      }),
-    onSuccess: async (r, ids) => {
+      });
+      return { result, sent };
+    },
+    onSuccess: async ({ result: r, sent }) => {
       const conflicted = new Set(r.conflicts.map((c) => c.enrollmentId));
       setConflicts(conflicted);
-      // Drop saved edits; keep conflicting ones so the user can review them.
-      setEdits((cur) => Object.fromEntries(Object.entries(cur).filter(([id]) => !ids.includes(Number(id)) || conflicted.has(Number(id)))));
+
+      // Put the saved values (and their new versions) into the grid straight away, so the cell never
+      // flashes back to the old mark while the grid reloads.
+      const savedById = new Map(r.rows.map((row) => [row.enrollmentId, row.version]));
+      qc.setQueryData<MarksGrid>(queryKey, (old) =>
+        old && {
+          ...old,
+          rows: old.rows.map((row) => {
+            if (!savedById.has(row.enrollmentId) || conflicted.has(row.enrollmentId)) return row;
+            const e = sent.get(row.enrollmentId)!;
+            const version = savedById.get(row.enrollmentId)!;
+            return {
+              ...row,
+              status: e.status,
+              marks: e.status === 'PRESENT' && e.marks.trim() !== '' ? Number(e.marks) : null,
+              version: version > 0 ? version : null,
+            };
+          }),
+        },
+      );
+      // Drop an edit only if it still equals what was saved; newer typing stays pending (and autosaves).
+      setEdits((cur) =>
+        Object.fromEntries(
+          Object.entries(cur).filter(([idS, cell]) => {
+            const id = Number(idS);
+            const s = sent.get(id);
+            if (!s || conflicted.has(id)) return true;
+            return !(s.marks.trim() === cell.marks.trim() && s.status === cell.status);
+          }),
+        ),
+      );
       if (conflicted.size) toast.warning(`${conflicted.size} mark(s) were changed by someone else. Review the highlighted rows and save again.`);
-      await qc.invalidateQueries({ queryKey });
-      await qc.invalidateQueries({ queryKey: ['exam-progress', examId] });
+      void qc.invalidateQueries({ queryKey });
+      void qc.invalidateQueries({ queryKey: ['exam-progress', examId] });
     },
     onError: toastError,
   });
@@ -233,11 +266,7 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
           {editable && <Button size="sm" disabled={!savable.length} loading={save.isPending} onClick={() => save.mutate(savable)}>Save now</Button>}
         </div>
       </div>
-      {!editable && (
-        <div className="px-5 pt-4">
-          <Alert tone="blue">Marks can only be changed while the exam is open for mark entry{component.included ? '' : ' and the component is included'}.</Alert>
-        </div>
-      )}
+      {!editable && <ReadOnlyNotice exam={grid.data.exam} included={component.included} />}
       {rows.length === 0 ? (
         <EmptyClass exam={grid.data.exam} streamId={streamId} section={section} />
       ) : (
@@ -351,5 +380,40 @@ function EmptyClass({ exam, streamId, section }: { exam: MarksGrid['exam']; stre
       title="No students take this subject in the selected class"
       description={streamId || section ? 'Try clearing the stream or section filter.' : undefined}
     />
+  );
+}
+
+/** Explains why marks can't be edited and how to make them editable. */
+function ReadOnlyNotice({ exam, included }: { exam: MarksGrid['exam']; included: boolean }) {
+  const open = (
+    <Link to={`/exams/${exam.id}`} className="mt-2 inline-block">
+      <Button size="sm" variant="secondary">Open {exam.name}</Button>
+    </Link>
+  );
+  let body: React.ReactNode;
+  if (!included) {
+    body = <>This component is left out of "{exam.name}" (see the exam's <b>Full marks &amp; components</b> tab), so it takes no marks.</>;
+  } else if (exam.status === 'PUBLISHED') {
+    body = (
+      <>
+        <p className="font-medium">"{exam.name}" is published, so its marks are locked.</p>
+        <p className="mt-1">
+          To correct a mark: open the exam and click <b>Unpublish</b> (give a reason), change the marks here, then click
+          <b> Publish results</b> again. The grade sheets are regenerated with the corrected marks.
+        </p>
+      </>
+    );
+  } else if (exam.status === 'LOCKED') {
+    body = <>"{exam.name}" is locked. Only a super admin can unlock it (then unpublish) before marks can change.</>;
+  } else {
+    body = <>"{exam.name}" is still a draft. Open the exam and click <b>Open mark entry</b> to start entering marks.</>;
+  }
+  return (
+    <div className="px-5 pt-4">
+      <Alert tone="amber">
+        {body}
+        {included && exam.status !== 'LOCKED' && <div>{open}</div>}
+      </Alert>
+    </div>
   );
 }

@@ -6,6 +6,10 @@ export interface AcademicYear {
   startDateAd: string | null;
   endDateAd: string | null;
   isCurrent: boolean;
+  /** Present in the year list (GET /academic-years). */
+  enrollmentCount?: number;
+  examCount?: number;
+  publishedExamCount?: number;
 }
 
 export interface Stream {

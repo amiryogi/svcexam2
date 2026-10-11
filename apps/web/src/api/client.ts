@@ -103,12 +103,21 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
 }
 
 /** Downloads a file response (PDF, XLSX) and saves it with the server-provided file name. */
+/**
+ * Fetches a report file as base64 inside JSON (`as=base64`). Microsoft Edge recognises PDF bytes in a
+ * fetched response and hands the page an empty body, so the raw file is never fetched directly.
+ */
+async function fetchFile(path: string, query?: Query): Promise<{ blob: Blob; name: string }> {
+  const r = await api<{ filename: string; mime: string; data: string }>(path, { query: { ...query, as: 'base64' } });
+  const bin = atob(r.data);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  if (bytes.length === 0) throw new ApiError(200, 'EMPTY_FILE', 'The file came back empty. Please try again.');
+  return { blob: new Blob([bytes], { type: r.mime }), name: r.filename };
+}
+
 export async function downloadFile(path: string, query?: Query): Promise<void> {
-  const res = await fetch(buildUrl(path, query), { credentials: 'same-origin' });
-  if (!res.ok) throw await toError(res);
-  const blob = await res.blob();
-  const disposition = res.headers.get('Content-Disposition') ?? '';
-  const name = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'download';
+  const { blob, name } = await fetchFile(path, query);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -119,15 +128,25 @@ export async function downloadFile(path: string, query?: Query): Promise<void> {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
-/** Opens a PDF response in a new tab for preview/printing. */
+/**
+ * Opens a PDF in a new tab for preview/printing. The tab is opened synchronously on the click (so
+ * popup blockers allow it) and filled once the PDF arrives; if popups are blocked, it downloads instead.
+ */
 export async function openPdf(path: string, query?: Query): Promise<void> {
   const tab = window.open('', '_blank');
+  if (tab) tab.document.title = 'Preparing PDF…';
   try {
-    const res = await fetch(buildUrl(path, query), { credentials: 'same-origin' });
-    if (!res.ok) throw await toError(res);
-    const url = URL.createObjectURL(await res.blob());
-    if (tab) tab.location.href = url;
-    else window.location.href = url;
+    const { blob, name } = await fetchFile(path, query);
+    const url = URL.createObjectURL(blob);
+    if (tab && !tab.closed) {
+      tab.location.href = url;
+    } else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.click();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
   } catch (e) {
     tab?.close();
     throw e;

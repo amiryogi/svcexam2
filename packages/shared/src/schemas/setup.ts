@@ -17,12 +17,30 @@ export const settingsSchema = z.object({
 });
 export type SettingsInput = z.input<typeof settingsSchema>;
 
-export const academicYearSchema = z.object({
-  name: z.string().trim().regex(/^\d{4}(\/\d{2,4})?$/, 'e.g. 2082 or 2082/83'),
-  startDateAd: adDateSchema.nullish().or(z.literal('').transform(() => null)),
-  endDateAd: adDateSchema.nullish().or(z.literal('').transform(() => null)),
-});
+/** A plain B.S. year such as "2084" – the year the session starts in. */
+export const academicYearNameSchema = z.string().trim().regex(/^\d{4}$/, 'Use the 4-digit B.S. year, e.g. 2084');
+
+export const academicYearSchema = z
+  .object({
+    name: academicYearNameSchema,
+    startDateAd: adDateSchema.nullish().or(z.literal('').transform(() => null)),
+    endDateAd: adDateSchema.nullish().or(z.literal('').transform(() => null)),
+    /** Required to rename a year whose published grade sheets would then print the new year. */
+    confirmRename: z.boolean().optional(),
+  })
+  .refine((y) => !y.startDateAd || !y.endDateAd || y.endDateAd > y.startDateAd, {
+    message: 'End date must be after the start date',
+    path: ['endDateAd'],
+  });
 export type AcademicYearInput = z.input<typeof academicYearSchema>;
+
+/** The B.S. year of an academic year's name: "2083" -> 2083. */
+export const academicYearNumber = (name: string): number => Number(name.match(/\d{4}/)?.[0] ?? NaN);
+
+/** True when `later` is a later academic year than `earlier` (compared by B.S. year). */
+export function isLaterAcademicYear(later: { name: string }, earlier: { name: string }): boolean {
+  return academicYearNumber(later.name) > academicYearNumber(earlier.name);
+}
 
 export const streamSchema = z.object({
   code: z.string().trim().toUpperCase().regex(/^[A-Z0-9_]{2,20}$/, '2–20 letters/numbers'),

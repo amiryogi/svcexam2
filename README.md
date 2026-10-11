@@ -15,7 +15,7 @@ enrollment, terminal/final exams, mark entry, results and A4 grade-sheet printin
 ## Features
 
 - **Students**: create, edit, search, soft-delete/restore, CSV import. Dates of birth in B.S. and A.D. are converted automatically and checked against each other.
-- **Enrollment**: academic year → grade → stream → section/roll/symbol no. Subjects are chosen from **curriculum groups** (e.g. "Compulsory", "Social Studies / Mathematics", "Optional III"), and the API enforces the minimum and maximum per group. There is also a bulk symbol-number editor and a Grade XI → XII promotion that maps subjects by family code.
+- **Enrollment**: academic year → grade → stream → section/roll/symbol no. Subjects are chosen from **curriculum groups** (e.g. "Compulsory", "Social Studies / Mathematics", "Optional III"), and the API enforces the minimum and maximum per group. There is also a bulk symbol-number editor, a Grade XI → XII promotion that maps subjects by family code (only students who passed the published Grade XI Final move up), and a "Mark XII passed out" step that sets students who passed the Grade XII Final to *Passed out*. Academic years are named by their 4-digit B.S. year (e.g. `2084`).
 - **Exams**: any number of exams per year and grade (First Terminal, Send-up, Final …). An exam moves through `Draft → Mark entry → Published → Locked`. Full marks can be overridden per exam, and a component can be left out (e.g. a terminal exam with no internal marks).
 - **Mark entry**: a spreadsheet-style grid with keyboard navigation (Enter / ↑ / ↓) and Present/Absent/Withheld status.
   - Shows a live grade for each mark and validates it against the full mark.
@@ -118,7 +118,7 @@ Quality checks: `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`
 
 ## Security summary
 
-- **Admin-only.** Every API route except login requires a session. Roles are `SUPER_ADMIN` (manages users, can unlock exams) and `ADMIN`.
+- **Admin-only.** Every API route except login requires a session. The only other public routes are `/api/v1/public/branding` and `/api/v1/public/logo`. They return just the school name, address and logo (already printed on every grade sheet), so the login page can show them. Roles are `SUPER_ADMIN` (manages users, can unlock exams) and `ADMIN`.
 - **Passwords:** argon2id with OWASP parameters, a minimum of 10 characters with mixed case and digits. No default password exists. Changing a password signs out the account's other sessions.
 - **Sessions:** a random 256-bit token in an `HttpOnly; Secure; SameSite=Strict` cookie (`__Host-` prefix in production). Only its SHA-256 hash is stored. Timeouts are 30 minutes idle and 12 hours absolute.
 - **CSRF:** a synchronizer token (`X-CSRF-Token`), plus Origin/Referer checks, plus SameSite=Strict.

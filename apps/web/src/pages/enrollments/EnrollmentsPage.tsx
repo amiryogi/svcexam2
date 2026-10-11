@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowUpRight, Hash, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ArrowUpRight, GraduationCap, Hash, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
+import { isLaterAcademicYear } from '@svi/shared';
 import { api, ApiError } from '../../api/client';
-import { useAcademicYears, useStreams, useSubjects } from '../../api/hooks';
+import { qk, useAcademicYears, useStreams, useSubjects } from '../../api/hooks';
 import type { Enrollment } from '../../api/types';
 import { Alert, Button, Card, cn, ConfirmDialog, EmptyState, ErrorBlock, Field, Input, LoadingBlock, Modal, PageHeader, Select, Table, Td, Th } from '../../components/ui';
 import { toastError } from '../../lib/forms';
@@ -25,6 +26,7 @@ export function EnrollmentsPage() {
   const [symbolMode, setSymbolMode] = useState(false);
   const [symbols, setSymbols] = useState<Record<number, string>>({});
   const [promoteOpen, setPromoteOpen] = useState(false);
+  const [passOutOpen, setPassOutOpen] = useState(false);
   const subjects = useSubjects(grade);
   const presetStudentId = params.get('studentId') ? Number(params.get('studentId')) : null;
   const yearId = pickedYearId ?? (years.data?.find((y) => y.isCurrent) ?? years.data?.[0])?.id ?? null;
@@ -77,6 +79,7 @@ export function EnrollmentsPage() {
         actions={
           <>
             <Button variant="secondary" onClick={() => setPromoteOpen(true)}><ArrowUpRight className="size-4" /> Promote XI → XII</Button>
+            <Button variant="secondary" onClick={() => setPassOutOpen(true)}><GraduationCap className="size-4" /> Mark XII passed out</Button>
             {symbolMode ? (
               <>
                 <Button variant="secondary" onClick={() => { setSymbolMode(false); setSymbols({}); }}>Cancel</Button>
@@ -168,8 +171,16 @@ export function EnrollmentsPage() {
         onClose={() => setDeleting(null)}
       />
       {promoteOpen && <PromoteDialog open onClose={() => setPromoteOpen(false)} fromYearId={yearId} />}
+      {passOutOpen && <PassOutDialog onClose={() => setPassOutOpen(false)} defaultYearId={yearId} />}
     </>
   );
+}
+
+interface PromoteReport {
+  promoted: number;
+  skipped: { name: string; reason: string }[];
+  notes: { name: string; note: string }[];
+  toYear: { id: number; name: string; isCurrent: boolean };
 }
 
 function PromoteDialog({ open, onClose, fromYearId }: { open: boolean; onClose: () => void; fromYearId: number | null }) {
@@ -187,14 +198,27 @@ function PromoteDialog({ open, onClose, fromYearId }: { open: boolean; onClose: 
   const fromIndex = ordered.findIndex((y) => y.id === from);
   const to = pickedTo ?? (fromIndex > 0 ? ordered[fromIndex - 1]!.id : null);
   const [streamId, setStreamId] = useState('');
-  const [report, setReport] = useState<{ promoted: number; skipped: { name: string; reason: string }[] } | null>(null);
+  const [report, setReport] = useState<PromoteReport | null>(null);
   const [problem, setProblem] = useState<{ message: string; setup?: string } | null>(null);
   const plan = useGradeSetupPlan(11, 12);
   const needsSetup = setupNeeded(plan.data);
+  const fromYear = ordered.find((y) => y.id === from);
+  // Only later years can be a promotion target.
+  const laterYears = fromYear ? ordered.filter((y) => isLaterAcademicYear(y, fromYear)) : [];
+
+  const makeCurrent = useMutation({
+    mutationFn: (id: number) => api(`/academic-years/${id}/set-current`, { method: 'POST' }),
+    onSuccess: async () => {
+      toast.success('Current academic year changed');
+      setReport((r) => (r ? { ...r, toYear: { ...r.toYear, isCurrent: true } } : r));
+      await qc.invalidateQueries();
+    },
+    onError: toastError,
+  });
 
   const promote = useMutation({
     mutationFn: () =>
-      api<{ promoted: number; skipped: { name: string; reason: string }[] }>('/enrollments/promote', {
+      api<PromoteReport>('/enrollments/promote', {
         method: 'POST',
         body: { fromAcademicYearId: from, toAcademicYearId: to, streamId: streamId ? Number(streamId) : undefined },
       }),
@@ -204,6 +228,7 @@ function PromoteDialog({ open, onClose, fromYearId }: { open: boolean; onClose: 
       if (r.promoted > 0) toast.success(`Promoted ${r.promoted} student(s)`);
       else toast.warning('No students were promoted – see the reasons below');
       await qc.invalidateQueries({ queryKey: ['enrollments'] });
+      await qc.invalidateQueries({ queryKey: qk.years });
     },
     onError: (e) => {
       if (e instanceof ApiError && (e.status === 409 || e.status === 400)) {
@@ -238,20 +263,37 @@ function PromoteDialog({ open, onClose, fromYearId }: { open: boolean; onClose: 
         </div>
       ) : report ? (
         <div className="space-y-3 text-sm">
-          <Alert tone="green">{report.promoted} student(s) enrolled in Grade XII.</Alert>
+          <Alert tone={report.promoted > 0 ? 'green' : 'amber'}>
+            {report.promoted} student(s) enrolled in Grade XII of {report.toYear.name}.
+          </Alert>
+          {report.notes.length > 0 && (
+            <Alert tone="blue">
+              <p className="font-medium">Please check {report.notes.length} promoted student(s):</p>
+              <ul className="mt-1 max-h-40 list-disc overflow-y-auto pl-5">{report.notes.map((n, i) => <li key={i}>{n.name}: {n.note}</li>)}</ul>
+            </Alert>
+          )}
           {report.skipped.length > 0 && (
             <Alert>
-              <p className="font-medium">{report.skipped.length} skipped:</p>
+              <p className="font-medium">{report.skipped.length} not promoted:</p>
               <ul className="mt-1 max-h-48 list-disc overflow-y-auto pl-5">{report.skipped.map((s, i) => <li key={i}>{s.name}: {s.reason}</li>)}</ul>
             </Alert>
+          )}
+          {report.promoted > 0 && !report.toYear.isCurrent && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-slate-50 p-3 ring-1 ring-slate-200">
+              <span className="text-slate-700">{report.toYear.name} is not the current academic year yet. Screens and new exams still default to the old year.</span>
+              <Button size="sm" loading={makeCurrent.isPending} onClick={() => makeCurrent.mutate(report.toYear.id)}>
+                Make {report.toYear.name} current
+              </Button>
+            </div>
           )}
         </div>
       ) : (
         <div className="space-y-4">
           {plan.data && plan.data.from === 11 && <Steps current={2} />}
           <p className="text-sm text-slate-600">
-            Active Grade XI students are enrolled in Grade XII of the target year with the same stream, section and roll number.
-            Subjects are matched by family code, so Grade XII subjects must be set up first.
+            Students who <b>passed</b> the published Grade XI Final exam of the From year are enrolled in Grade XII of the target year with the same
+            stream, section and roll number. Students with NG or an incomplete result stay in Grade XI. Subjects are matched by family code, so
+            Grade XII subjects must be set up first.
           </p>
           {problem && (
             <Alert tone="red">
@@ -272,7 +314,98 @@ function PromoteDialog({ open, onClose, fromYearId }: { open: boolean; onClose: 
             <Field label="To year">
               <Select value={to ?? ''} onChange={(e) => setTo(Number(e.target.value))}>
                 <option value="">Choose…</option>
-                {years.data?.filter((y) => y.id !== from).map((y) => <option key={y.id} value={y.id}>{y.name}</option>)}
+                {laterYears.map((y) => <option key={y.id} value={y.id}>{y.name}</option>)}
+              </Select>
+            </Field>
+            <Field label="Stream">
+              <Select value={streamId} onChange={(e) => setStreamId(e.target.value)}>
+                <option value="">All</option>
+                {streams.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </Select>
+            </Field>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+interface PassOutReport {
+  passedOut: number;
+  alreadyPassedOut: number;
+  skipped: { name: string; reason: string }[];
+  year: { id: number; name: string };
+}
+
+function PassOutDialog({ onClose, defaultYearId }: { onClose: () => void; defaultYearId: number | null }) {
+  const qc = useQueryClient();
+  const years = useAcademicYears();
+  const streams = useStreams();
+  const [pickedYear, setYear] = useState<number | null>(null);
+  const yearId = pickedYear ?? defaultYearId;
+  const [streamId, setStreamId] = useState('');
+  const [report, setReport] = useState<PassOutReport | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const passOut = useMutation({
+    mutationFn: () =>
+      api<PassOutReport>('/enrollments/pass-out', {
+        method: 'POST',
+        body: { academicYearId: yearId, streamId: streamId ? Number(streamId) : undefined },
+      }),
+    onMutate: () => setProblem(null),
+    onSuccess: async (r) => {
+      setReport(r);
+      if (r.passedOut > 0) toast.success(`Marked ${r.passedOut} student(s) as passed out`);
+      else if (r.skipped.length) toast.warning('No students were marked as passed out – see the reasons below');
+      else toast.info('These students were already marked as passed out');
+      // Student statuses show on several screens (students list, profiles, dashboard).
+      await qc.invalidateQueries();
+    },
+    onError: (e) => {
+      if (e instanceof ApiError && (e.status === 409 || e.status === 400)) setProblem(e.message);
+      else toastError(e);
+    },
+  });
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Mark Grade XII students as passed out"
+      size="md"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Close</Button>
+          {!report && <Button disabled={!yearId} loading={passOut.isPending} onClick={() => passOut.mutate()}>Mark passed out</Button>}
+        </>
+      }
+    >
+      {report ? (
+        <div className="space-y-3 text-sm">
+          <Alert tone={report.passedOut > 0 ? 'green' : 'amber'}>
+            {report.passedOut} Grade XII student(s) of {report.year.name} marked as passed out.
+            {report.alreadyPassedOut > 0 && ` ${report.alreadyPassedOut} already were.`}
+          </Alert>
+          {report.skipped.length > 0 && (
+            <Alert>
+              <p className="font-medium">{report.skipped.length} not marked:</p>
+              <ul className="mt-1 max-h-48 list-disc overflow-y-auto pl-5">{report.skipped.map((s, i) => <li key={i}>{s.name}: {s.reason}</li>)}</ul>
+            </Alert>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Grade XII students who <b>passed</b> the published Grade XII Final exam of the chosen year get the status <b>Passed out</b>.
+            Students with NG or an incomplete result stay Active. Records, enrollments and grade sheets are kept, and a student's status
+            can be changed later by editing the student.
+          </p>
+          {problem && <Alert tone="red">{problem}</Alert>}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Academic year">
+              <Select value={yearId ?? ''} onChange={(e) => setYear(Number(e.target.value))}>
+                {years.data?.map((y) => <option key={y.id} value={y.id}>{y.name}{y.isCurrent ? ' (current)' : ''}</option>)}
               </Select>
             </Field>
             <Field label="Stream">

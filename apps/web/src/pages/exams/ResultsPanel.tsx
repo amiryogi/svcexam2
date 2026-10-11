@@ -45,13 +45,13 @@ export function ResultsPanel({ exam }: { exam: ExamDto }) {
         description={published ? 'Published results – frozen at the time of publishing.' : 'Live results – grade sheets print as PROVISIONAL until the exam is published.'}
         actions={
           <>
-            <Button variant="secondary" loading={busy === 'sheets'} onClick={() => run('sheets', () => openPdf(`/reports/exams/${exam.id}/gradesheets.pdf`, filters))}>
+            <Button variant="secondary" loading={busy === 'sheets'} onClick={() => run('sheets', () => openPdf(`/reports/exams/${exam.id}/gradesheets`, filters))}>
               <Printer className="size-4" /> Grade sheets (PDF)
             </Button>
-            <Button variant="secondary" loading={busy === 'ledger'} onClick={() => run('ledger', () => downloadFile(`/reports/exams/${exam.id}/ledger.pdf`, filters))}>
+            <Button variant="secondary" loading={busy === 'ledger'} onClick={() => run('ledger', () => downloadFile(`/reports/exams/${exam.id}/ledger`, { ...filters, format: 'pdf' }))}>
               <FileDown className="size-4" /> Ledger PDF
             </Button>
-            <Button variant="secondary" loading={busy === 'xlsx'} onClick={() => run('xlsx', () => downloadFile(`/reports/exams/${exam.id}/ledger.xlsx`, filters))}>
+            <Button variant="secondary" loading={busy === 'xlsx'} onClick={() => run('xlsx', () => downloadFile(`/reports/exams/${exam.id}/ledger`, { ...filters, format: 'xlsx' }))}>
               <FileSpreadsheet className="size-4" /> Ledger Excel
             </Button>
           </>
@@ -125,7 +125,7 @@ export function ResultsPanel({ exam }: { exam: ExamDto }) {
                         size="sm"
                         variant="ghost"
                         title="Grade sheet"
-                        onClick={() => run(`one-${r.enrollmentId}`, () => openPdf(`/reports/exams/${exam.id}/gradesheets.pdf`, { enrollmentId: r.enrollmentId }))}
+                        onClick={() => run(`one-${r.enrollmentId}`, () => openPdf(`/reports/exams/${exam.id}/gradesheets`, { enrollmentId: r.enrollmentId }))}
                         loading={busy === `one-${r.enrollmentId}`}
                       >
                         <Printer className="size-4" />

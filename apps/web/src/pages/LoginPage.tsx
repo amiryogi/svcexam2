@@ -5,11 +5,14 @@ import { useForm } from 'react-hook-form';
 import { Navigate, useNavigate, useSearchParams } from 'react-router';
 import { loginSchema, type LoginInput } from '@svi/shared';
 import { errorMessage } from '../api/client';
+import { useBranding } from '../api/hooks';
 import { useAuth } from '../auth/AuthProvider';
+import { SchoolLogo } from '../components/SchoolLogo';
 import { Alert, Button, Field, Input } from '../components/ui';
 
 export function LoginPage() {
   const { user, login } = useAuth();
+  const branding = useBranding();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -32,14 +35,18 @@ export function LoginPage() {
   });
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand-900 to-brand-700 px-4">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-brand-900 to-brand-700 px-4 py-10">
       <div className="w-full max-w-sm">
-        <div className="mb-6 flex flex-col items-center text-white">
-          <ClipboardList className="size-12" />
-          <h1 className="mt-3 text-xl font-semibold">+2 Exam Management</h1>
-          <p className="text-sm text-brand-100">Administrator sign in</p>
+        <div className="mb-6 flex flex-col items-center text-center text-white">
+          <SchoolLogo size="xl" className="ring-4 ring-white/20" />
+          <h1 className="mt-4 text-2xl font-semibold tracking-tight">{branding.data?.name ?? ' '}</h1>
+          {branding.data?.address && <p className="mt-0.5 text-sm text-brand-100">{branding.data.address}</p>}
+          <p className="mt-4 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium tracking-wide text-brand-100 uppercase">
+            <ClipboardList className="size-3.5" /> +2 Exam Management
+          </p>
         </div>
         <form onSubmit={onSubmit} className="space-y-4 rounded-xl bg-white p-6 shadow-xl" noValidate>
+          <h2 className="text-center text-base font-semibold text-slate-900">Administrator sign in</h2>
           {error && <Alert tone="red">{error}</Alert>}
           <Field label="Username" error={form.formState.errors.username?.message}>
             <Input autoComplete="username" autoFocus {...form.register('username')} />
@@ -52,6 +59,9 @@ export function LoginPage() {
           </Button>
           <p className="text-center text-xs text-slate-500">Authorised staff only. All activity is logged.</p>
         </form>
+        <p className="mt-6 text-center text-xs text-brand-100/70">
+          © {new Date().getFullYear()} {branding.data?.name ?? ''} · NEB Grade XI–XII
+        </p>
       </div>
     </div>
   );

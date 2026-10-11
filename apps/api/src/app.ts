@@ -16,6 +16,7 @@ import { auditRouter, dashboardRouter } from './modules/dashboard/dashboard.rout
 import { enrollmentsRouter } from './modules/enrollments/enrollments.routes.js';
 import { examsRouter } from './modules/exams/exams.routes.js';
 import { reportsRouter } from './modules/reports/reports.routes.js';
+import { publicRouter } from './modules/settings/public.routes.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
 import { studentsRouter } from './modules/students/students.routes.js';
 import { curriculumRouter, gradeScalesRouter, subjectsRouter } from './modules/subjects/subjects.routes.js';
@@ -58,6 +59,8 @@ export function createApp() {
 
   api.use(apiLimiter, originCheck, loadSession, csrfProtect);
   api.use('/auth', authRouter);
+  // School name, address and logo for the login page (no sign-in needed).
+  api.use('/public', publicRouter);
 
   // Everything below requires a signed-in admin.
   api.use(requireAuth);

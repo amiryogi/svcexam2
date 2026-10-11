@@ -12,6 +12,15 @@ export interface ApiErrorBody {
   error: { code: string; message: string; details?: unknown };
 }
 
+/** Public school identity for the login page and app chrome (GET /public/branding). */
+export interface PublicBranding {
+  name: string;
+  address: string | null;
+  hasLogo: boolean;
+  /** Changes when settings are saved; append to the logo URL to refresh cached copies. */
+  version: number;
+}
+
 export interface SchoolInfo {
   name: string;
   address: string | null;
@@ -24,7 +33,10 @@ export interface SchoolInfo {
   principalName: string | null;
   principalTitle: string;
   gradesheetNote: string | null;
+  /** Black & white logo printed on grade sheets and ledgers. */
   hasLogo: boolean;
+  /** Colour logo shown on the website. */
+  hasWebLogo: boolean;
 }
 
 export interface SubjectComponentDto {

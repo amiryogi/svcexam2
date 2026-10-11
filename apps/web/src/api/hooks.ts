@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { ExamDto, SchoolInfo, SubjectDto } from '@svi/shared';
+import type { ExamDto, PublicBranding, SchoolInfo, SubjectDto } from '@svi/shared';
 import { api } from './client';
 import type { AcademicYear, Stream } from './types';
 
@@ -8,6 +8,7 @@ export const qk = {
   streams: ['streams'] as const,
   subjects: (grade?: number) => ['subjects', grade ?? 'all'] as const,
   settings: ['settings'] as const,
+  branding: ['branding'] as const,
   exams: (filters: object = {}) => ['exams', filters] as const,
   exam: (id: number) => ['exam', id] as const,
 };
@@ -44,3 +45,15 @@ export function useExams(filters: { academicYearId?: number; grade?: number } = 
 export function useExam(id: number) {
   return useQuery({ queryKey: qk.exam(id), queryFn: () => api<ExamDto>(`/exams/${id}`) });
 }
+
+/** School name / address / logo flag – public, so it also works on the login page. */
+export function useBranding() {
+  return useQuery({
+    queryKey: qk.branding,
+    queryFn: () => api<PublicBranding>('/public/branding'),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+}
+
+export const logoUrl = (b: PublicBranding | undefined) => (b?.hasLogo ? `/api/v1/public/logo?v=${b.version}` : null);

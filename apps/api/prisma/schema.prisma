@@ -83,7 +83,10 @@ model SchoolSetting {
   email          String?  @db.VarChar(120)
   website        String?  @db.VarChar(120)
   nebSchoolCode  String?  @map("neb_school_code") @db.VarChar(30)
+  /// Black & white logo printed on grade sheets and ledgers.
   logoPath       String?  @map("logo_path") @db.VarChar(255)
+  /// Colour logo shown on the website (login page, sidebar, dashboard, browser tab).
+  webLogoPath    String?  @map("web_logo_path") @db.VarChar(255)
   preparedByName String?  @map("prepared_by_name") @db.VarChar(120)
   checkedByName  String?  @map("checked_by_name") @db.VarChar(120)
   principalName  String?  @map("principal_name") @db.VarChar(120)

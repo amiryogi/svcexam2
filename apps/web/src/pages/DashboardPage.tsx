@@ -3,7 +3,9 @@ import { BookOpenCheck, GraduationCap, Users } from 'lucide-react';
 import { Link } from 'react-router';
 import type { DashboardSummary } from '@svi/shared';
 import { api } from '../api/client';
-import { Alert, Badge, Card, CardHeader, EmptyState, ErrorBlock, LoadingBlock, PageHeader, Table, Td, Th } from '../components/ui';
+import { useBranding } from '../api/hooks';
+import { SchoolLogo } from '../components/SchoolLogo';
+import { Alert, Badge, Card, CardHeader, EmptyState, ErrorBlock, LoadingBlock, Table, Td, Th } from '../components/ui';
 import { EXAM_STATUS_COLOR, EXAM_STATUS_LABEL, formatDateTime, gradeLabel, titleCase } from '../lib/format';
 
 function Stat({ label, value, icon: Icon }: { label: string; value: number | string; icon: typeof Users }) {
@@ -21,6 +23,7 @@ function Stat({ label, value, icon: Icon }: { label: string; value: number | str
 }
 
 export function DashboardPage() {
+  const branding = useBranding();
   const q = useQuery({ queryKey: ['dashboard'], queryFn: () => api<DashboardSummary>('/dashboard/summary') });
   if (q.isPending) return <LoadingBlock />;
   if (q.isError) return <ErrorBlock error={q.error} onRetry={() => q.refetch()} />;
@@ -28,7 +31,22 @@ export function DashboardPage() {
 
   return (
     <>
-      <PageHeader title="Dashboard" description={d.currentAcademicYear ? `Academic year ${d.currentAcademicYear.name}` : undefined} />
+      <Card className="mb-6 overflow-hidden">
+        <div className="flex flex-col items-center gap-4 bg-gradient-to-r from-brand-900 to-brand-700 px-6 py-5 text-center text-white sm:flex-row sm:text-left">
+          <SchoolLogo size="lg" className="ring-4 ring-white/20" />
+          <div className="min-w-0 sm:flex-1">
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{branding.data?.name ?? 'Dashboard'}</h1>
+            {branding.data?.address && <p className="text-sm text-brand-100">{branding.data.address}</p>}
+            <p className="mt-1 text-xs tracking-wide text-brand-100/80 uppercase">+2 Exam Management · NEB Grade XI–XII</p>
+          </div>
+          {d.currentAcademicYear && (
+            <div className="rounded-lg bg-white/10 px-4 py-2 text-center sm:text-right">
+              <p className="text-xs text-brand-100">Academic year</p>
+              <p className="text-lg font-semibold">{d.currentAcademicYear.name}</p>
+            </div>
+          )}
+        </div>
+      </Card>
       {!d.currentAcademicYear && (
         <div className="mb-6">
           <Alert>
