@@ -23,7 +23,8 @@ run('npm run build -w @svi/api');
 
 // Empty rather than delete deploy/api: Windows refuses to delete a folder open in Explorer or a shell.
 mkdirSync(out, { recursive: true });
-for (const entry of readdirSync(out)) rmSync(path.join(out, entry), { recursive: true, force: true });
+for (const entry of readdirSync(out))
+  rmSync(path.join(out, entry), { recursive: true, force: true });
 rmSync(zip, { force: true });
 
 cpSync(path.join(api, 'dist'), path.join(out, 'dist'), { recursive: true });
@@ -31,17 +32,28 @@ cpSync(path.join(api, 'prisma'), path.join(out, 'prisma'), { recursive: true });
 cpSync(path.join(api, 'fonts'), path.join(out, 'fonts'), { recursive: true });
 cpSync(path.join(api, 'app.cjs'), path.join(out, 'app.cjs'));
 
-// @svi/shared as a local file: dependency, without the "development" (TypeScript source) export.
+// @svi/shared is imported by relative path instead of as a package. CloudLinux's Node.js selector
+// keeps node_modules elsewhere (nodevenv) behind a symlink, which breaks npm's file:/link deps.
 const sharedPkg = readJson(path.join(shared, 'package.json'));
+const sharedEntry = path.join(out, 'shared/dist/index.js');
 cpSync(path.join(shared, 'dist'), path.join(out, 'shared/dist'), { recursive: true });
-writeJson(path.join(out, 'shared/package.json'), {
-  name: sharedPkg.name,
-  version: sharedPkg.version,
-  private: true,
-  type: 'module',
-  exports: { '.': { types: './dist/index.d.ts', default: './dist/index.js' } },
-  dependencies: sharedPkg.dependencies,
-});
+writeJson(path.join(out, 'shared/package.json'), { private: true, type: 'module' });
+
+const jsFiles = (dir) =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory()
+      ? jsFiles(path.join(dir, e.name))
+      : e.name.endsWith('.js')
+        ? [path.join(dir, e.name)]
+        : [],
+  );
+for (const file of jsFiles(path.join(out, 'dist'))) {
+  const src = readFileSync(file, 'utf8');
+  if (!src.includes(`'@svi/shared'`)) continue;
+  let rel = path.relative(path.dirname(file), sharedEntry).split(path.sep).join('/');
+  if (!rel.startsWith('.')) rel = `./${rel}`;
+  writeFileSync(file, src.replaceAll(`'@svi/shared'`, `'${rel}'`));
+}
 
 const apiPkg = readJson(path.join(api, 'package.json'));
 const rootPkg = readJson(path.join(root, 'package.json'));
@@ -58,7 +70,11 @@ writeJson(path.join(out, 'package.json'), {
     'db:seed:prod': 'node dist/scripts/seed.js',
     'create-admin': 'node dist/scripts/createAdmin.js',
   },
-  dependencies: { ...apiPkg.dependencies, '@svi/shared': 'file:./shared' },
+  dependencies: Object.fromEntries(
+    Object.entries({ ...sharedPkg.dependencies, ...apiPkg.dependencies }).filter(
+      ([name]) => name !== '@svi/shared',
+    ),
+  ),
   optionalDependencies: apiPkg.optionalDependencies,
 });
 

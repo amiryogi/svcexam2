@@ -19,9 +19,9 @@
     "db:seed:prod": "node dist/scripts/seed.js"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.2.2",
     "@prisma/client": "~6.19.3",
     "@svi/shared": "*",
-    "argon2": "^0.45.1",
     "cookie-parser": "^1.4.7",
     "csv-parse": "^6.1.0",
     "exceljs": "^4.4.0",

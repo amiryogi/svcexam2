@@ -32,7 +32,8 @@ COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY apps/api/prisma apps/api/prisma
-RUN npm ci --omit=dev --omit=optional --no-audit --no-fund -w @svi/api -w @svi/shared && npm cache clean --force
+# System Chromium is installed above, so the bundled one (for shared hosting) is removed.
+RUN npm ci --omit=dev --no-audit --no-fund -w @svi/api -w @svi/shared && rm -rf node_modules/@sparticuz && npm cache clean --force
 COPY --from=build /app/packages/shared/dist packages/shared/dist
 COPY --from=build /app/apps/api/dist apps/api/dist
 RUN mkdir -p /app/storage && chown -R node:node /app/storage

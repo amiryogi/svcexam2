@@ -1,4 +1,4 @@
-import argon2 from 'argon2';
+import * as argon2 from '@node-rs/argon2';
 import { env } from '../../config/env.js';
 import { recordAudit, type Ctx } from '../../lib/audit.js';
 import { randomToken, sha256 } from '../../lib/crypto.js';
@@ -6,10 +6,27 @@ import { AppError, unauthorized } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { toAuthUser } from '../../middleware/auth.js';
 
-// OWASP recommended argon2id parameters.
-const HASH_OPTIONS = { type: argon2.argon2id, memoryCost: 19_456, timeCost: 2, parallelism: 1 } as const;
+// OWASP recommended argon2id parameters (argon2id is the library default). @node-rs/argon2 is used
+// because its Linux build needs only glibc 2.14, so it runs on older shared hosting (CloudLinux 8).
+const HASH_OPTIONS = { memoryCost: 19_456, timeCost: 2, parallelism: 1 } as const;
+const ARGON2ID = 2; // Algorithm.Argon2id (an ambient const enum, unusable with isolatedModules)
 
 export const hashPassword = (password: string) => argon2.hash(password, HASH_OPTIONS);
+
+/** True when a stored hash was made with other parameters than HASH_OPTIONS. */
+function needsRehash(hash: string): boolean {
+  try {
+    const p = argon2.parseOptions(hash);
+    return (
+      p.algorithm !== ARGON2ID ||
+      p.memoryCost !== HASH_OPTIONS.memoryCost ||
+      p.timeCost !== HASH_OPTIONS.timeCost ||
+      p.parallelism !== HASH_OPTIONS.parallelism
+    );
+  } catch {
+    return true;
+  }
+}
 
 let dummyHash: Promise<string> | null = null;
 /** Verifies against a throwaway hash so unknown usernames take as long as wrong passwords. */
@@ -55,9 +72,7 @@ export async function login(
     throw unauthorized(INVALID);
   }
 
-  const passwordHash = argon2.needsRehash(user.passwordHash, HASH_OPTIONS)
-    ? await hashPassword(password)
-    : undefined;
+  const passwordHash = needsRehash(user.passwordHash) ? await hashPassword(password) : undefined;
 
   const token = randomToken(32);
   const csrfToken = randomToken(32);
