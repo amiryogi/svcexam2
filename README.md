@@ -116,6 +116,65 @@ Quality checks: `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`
 
 **Scaling:** sessions are stored in MySQL, so the API is stateless and can be scaled with `--scale api=N` behind Nginx. The per-IP rate limiter is in-memory per replica, while account lockout is stored in the database and so applies across all replicas. If bulk PDF exports grow, move them to a job queue.
 
+## Deployment (cPanel Node.js hosting + Vercel)
+
+The API runs on cPanel hosting with **Setup Node.js App** and **Terminal** (here NestNepal, at `https://api.nevanhandicraft.com.np`). The web app runs on Vercel. Vercel forwards `/api/*` to the API ([apps/web/vercel.json](apps/web/vercel.json)), so the browser only ever talks to the Vercel address. The session cookie, CSRF check and logo images therefore work exactly as they do behind Nginx, and no CORS is needed.
+
+### API (cPanel)
+
+1. **Build the bundle** on your PC: `npm run build:deploy`. This creates `deploy/svi-api.zip`, which contains the compiled API, Prisma migrations, `@svi/shared`, PDF fonts, a lockfile and `app.cjs` (the Passenger startup file).
+2. **Subdomain:** in cPanel, go to *Domains*, create `api.nevanhandicraft.com.np`, and run *SSL/TLS Status → Run AutoSSL*.
+3. **Database:** in *MySQL Databases*, create a database and a user, and add the user to the database with ALL PRIVILEGES. The real names carry your cPanel prefix, e.g. `cpuser_svi`.
+4. **Upload:** in *File Manager*, create `/home/<cpuser>/svi-api` (outside `public_html`), upload `svi-api.zip` there and extract it. Also create `/home/<cpuser>/svi-storage`, where uploaded logos are stored.
+5. **Setup Node.js App → Create Application:**
+   - Node.js version: **22** or newer
+   - Application mode: Production
+   - Application root: `svi-api`
+   - Application URL: `api.nevanhandicraft.com.np`
+   - Application startup file: `app.cjs`
+   - Environment variables:
+
+   | Name | Value |
+   | --- | --- |
+   | `NODE_ENV` | `production` |
+   | `DATABASE_URL` | `mysql://cpuser_svi:PASSWORD@localhost:3306/cpuser_svi` (URL-encode special characters in the password) |
+   | `APP_ORIGIN` | `https://<project>.vercel.app`, the exact Vercel production URL with no trailing slash |
+   | `COOKIE_SECURE` | `true` |
+   | `TRUST_PROXY` | `2` (Vercel, then the web server; see the check below) |
+   | `STORAGE_DIR` | `/home/<cpuser>/svi-storage` |
+
+6. Click **Run NPM Install**. Then open **Terminal**, paste the `source …/activate && cd …` command shown at the top of the app page, and run:
+   ```bash
+   npx prisma migrate deploy
+   npm run db:seed:prod
+   npm run create-admin
+   ```
+7. **Restart** the app. `https://api.nevanhandicraft.com.np/api/v1/health` should return `{"status":"ok"}`.
+
+**PDFs:** shared hosting has no Chrome, so the API uses `@sparticuz/chromium`, a self-contained headless Chromium installed with the app. It renders one PDF at a time and is extracted to the temp folder the first time it's used. If PDFs fail with "PDF rendering failed to start", check the app's `stderr.log`:
+- If it complains about a missing library (e.g. `libnss3.so`), add `CHROME_BUNDLED_LIBS=true` and restart.
+- If Chromium is being killed for memory or process limits, ask the host to raise the account's limits. Otherwise, move the API to a VPS (see the Docker section above).
+
+### Web app (Vercel)
+
+1. On Vercel, choose *Add New → Project*, import this Git repository and set **Root Directory** to `apps/web`. The Vite preset, `npm run build` and the `dist` output are the defaults. No environment variables are needed.
+2. Deploy, then copy the production URL into `APP_ORIGIN` on the server and restart the Node app.
+3. Sign in and complete **Setup** as in step 5 of the Docker section.
+
+Logins only work on the production URL. Vercel preview deployments have other addresses, so the API's Origin check rejects them. If you later add a custom domain on Vercel, change `APP_ORIGIN` to match it.
+
+### Checks after the first deploy
+
+- Open the **Audit** page and check that the IP address on your own sign-in is your real public IP. If it shows a Vercel or `127.0.0.1` address, change `TRUST_PROXY` (try `1` or `3`) and restart. The login rate limiter depends on this IP.
+- Open a grade sheet and a ledger PDF. Reload a deep link such as `/students` and check that you're still signed in.
+- Backups: turn on the host's database backups (e.g. JetBackup in cPanel), or download a copy regularly from *phpMyAdmin → Export*.
+
+### Updating
+
+- **Web:** push to the Git branch Vercel deploys from.
+- **API:** run `npm run build:deploy`, upload `svi-api.zip` and extract it over `svi-api` (this overwrites `dist/` and `prisma/`). Click **Run NPM Install** if dependencies changed, run `npx prisma migrate deploy` in Terminal if there are new migrations, then click **Restart**.
+- Very large class-wide PDF exports can hit Vercel's proxy timeout. If one fails with a 504 error, export in smaller batches.
+
 ## Security summary
 
 - **Admin-only.** Every API route except login requires a session. The only other public routes are `/api/v1/public/branding` and `/api/v1/public/logo`. They return just the school name, address and logo (already printed on every grade sheet), so the login page can show them. Roles are `SUPER_ADMIN` (manages users, can unlock exams) and `ADMIN`.

@@ -44,5 +44,8 @@
     "supertest": "^7.3.1",
     "tsx": "^4.23.15",
     "vitest": "^3.2.7"
+  },
+  "optionalDependencies": {
+    "@sparticuz/chromium": "~153.0.0"
   }
 }

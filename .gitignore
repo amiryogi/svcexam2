@@ -13,3 +13,4 @@ tools/import-access/out/
 playwright-report/
 test-results/
 .DS_Store
+deploy/

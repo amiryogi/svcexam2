@@ -31,6 +31,11 @@ const schema = z.object({
   /** Chrome/Chromium/Edge executable used for PDF rendering. */
   CHROME_PATH: z.string().optional(),
   CHROME_NO_SANDBOX: bool('false'),
+  /**
+   * Bundled Chromium (@sparticuz/chromium, used when no system Chrome exists): also extract its
+   * shared libraries (libnss3 etc.) for hosts that lack them. Try this if Chromium fails to start.
+   */
+  CHROME_BUNDLED_LIBS: bool('false'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 });
 
