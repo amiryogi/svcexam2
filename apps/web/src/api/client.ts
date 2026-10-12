@@ -58,19 +58,27 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Every API response carries X-Request-Id. A 403 without it came from the hosting firewall (Imunify360
+ * bot-protection sometimes blocks requests arriving through Vercel's proxy), so it never reached the API
+ * and is safe to send again, whatever the method.
+ */
+const isFirewallBlock = (res: Response) => res.status === 403 && !res.headers.has('X-Request-Id');
+const FIREWALL_RETRY_DELAYS_MS = [700, 2000];
+
 async function toError(res: Response): Promise<ApiError> {
-  let body: ApiErrorBody | null = null;
+  let body: Partial<ApiErrorBody> | null = null;
   try {
-    body = (await res.json()) as ApiErrorBody;
+    body = (await res.json()) as Partial<ApiErrorBody>;
   } catch {
     // non-JSON error (proxy, network)
   }
-  return new ApiError(
-    res.status,
-    body?.error.code ?? 'HTTP_ERROR',
-    body?.error.message ?? `Request failed (${res.status})`,
-    body?.error.details,
-  );
+  const e = body?.error;
+  if (e?.code) return new ApiError(res.status, e.code, e.message, e.details);
+  if (isFirewallBlock(res)) {
+    return new ApiError(403, 'FIREWALL_BLOCKED', "The server's firewall blocked this request. Please try again in a moment.");
+  }
+  return new ApiError(res.status, 'HTTP_ERROR', `Request failed (${res.status})`);
 }
 
 export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T> {
@@ -86,13 +94,14 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   }
   if (method !== 'GET' && csrfToken) headers['X-CSRF-Token'] = csrfToken;
 
-  const res = await fetch(buildUrl(path, opts.query), {
-    method,
-    headers,
-    body,
-    credentials: 'same-origin',
-    signal: opts.signal,
-  });
+  const send = () =>
+    fetch(buildUrl(path, opts.query), { method, headers, body, credentials: 'same-origin', signal: opts.signal });
+  let res = await send();
+  for (const delay of FIREWALL_RETRY_DELAYS_MS) {
+    if (!isFirewallBlock(res)) break;
+    await new Promise((r) => setTimeout(r, delay));
+    res = await send();
+  }
   if (res.status === 204) return undefined as T;
   if (!res.ok) {
     const err = await toError(res);
