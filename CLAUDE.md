@@ -83,4 +83,12 @@ Tests use Vitest and never touch a database. `apps/api/vitest.config.ts` sets a 
 - TypeScript is strict with `noUncheckedIndexedAccess` and `verbatimModuleSyntax`. Use `import type` for type-only imports. API imports use `.js` extensions (ESM).
 - Prettier: single quotes, semicolons, trailing commas, width 100.
 - Line endings are mixed: some files are CRLF, others LF (`core.autocrlf=true`, no `.gitattributes`). Keep each file's existing endings when editing.
-- Deployment target in use: API on cPanel "Setup Node.js App" (Passenger, `app.cjs`), web on Vercel (`apps/web/vercel.json` rewrites `/api/*` to the API). Schema changes mean rebuilding the zip and running `npx prisma migrate deploy` on the server.
+- **Live in production** with real student data:
+  - API on NestNepal cPanel "Setup Node.js App" at `https://api.nevanhandicraft.com.np` (Passenger, `app.cjs`).
+  - Web on Vercel, which deploys on a push to `main`. `apps/web/vercel.json` rewrites `/api/*` to the API.
+
+  Keep migrations additive, with defaults that preserve current behaviour. The API is updated by hand:
+  1. `npm run build:deploy`;
+  2. upload and extract `deploy/svi-api.zip`;
+  3. `npx prisma migrate deploy` in the cPanel Terminal;
+  4. restart.
