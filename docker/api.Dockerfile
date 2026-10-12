@@ -2,7 +2,7 @@
 # Build context: repository root.
 
 # ───────── Build ─────────
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
@@ -17,7 +17,7 @@ COPY apps/api apps/api
 RUN npm run build -w @svi/shared && npm run build -w @svi/api
 
 # ───────── Runtime ─────────
-FROM node:24-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 # Chromium renders grade sheet PDFs; Noto fonts cover Devanagari names.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends chromium fonts-liberation fonts-noto-core openssl ca-certificates tini \
