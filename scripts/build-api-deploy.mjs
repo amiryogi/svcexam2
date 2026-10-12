@@ -29,7 +29,6 @@ rmSync(zip, { force: true });
 
 cpSync(path.join(api, 'dist'), path.join(out, 'dist'), { recursive: true });
 cpSync(path.join(api, 'prisma'), path.join(out, 'prisma'), { recursive: true });
-cpSync(path.join(api, 'fonts'), path.join(out, 'fonts'), { recursive: true });
 cpSync(path.join(api, 'app.cjs'), path.join(out, 'app.cjs'));
 
 // @svi/shared is imported by relative path instead of as a package. CloudLinux's Node.js selector
@@ -75,7 +74,6 @@ writeJson(path.join(out, 'package.json'), {
       ([name]) => name !== '@svi/shared',
     ),
   ),
-  optionalDependencies: apiPkg.optionalDependencies,
 });
 
 // Lockfile so the server installs the same versions every time.

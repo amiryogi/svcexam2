@@ -9,7 +9,7 @@ import { html, raw, type SafeHtml } from '../html.js';
 const css = raw(`
 @page { size: A4; margin: 14mm 15mm 12mm; }
 * { box-sizing: border-box; }
-body { font-family: "Times New Roman", "Liberation Serif", "Noto Serif", Times, serif; color: #000; font-size: 11.5pt; margin: 0; }
+body { font-family: "Times New Roman", "Liberation Serif", "Noto Serif", Times, serif; color: #000; font-size: 11.5pt; margin: 0; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 .sheet { position: relative; }
 .sheet + .sheet { break-before: page; }
 

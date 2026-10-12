@@ -1,4 +1,4 @@
-import { Router, type RequestHandler, type Response } from 'express';
+import { Router, type Request, type RequestHandler, type Response } from 'express';
 import ExcelJS from 'exceljs';
 import { z } from 'zod';
 import { formatGp, idSchema, resultsQuery } from '@svi/shared';
@@ -34,6 +34,23 @@ function sendFile(res: Response, buf: Buffer, mime: string, filename: string) {
   res.send(buf);
 }
 
+/**
+ * ?as=html: the web app prints report pages with the browser's print dialog ("Save as PDF"), so it
+ * asks for the page itself and the server never needs Chrome (cPanel shared hosting's process limit
+ * is too low to run it). Without it, the page is rendered to PDF here.
+ */
+const asHtml = (req: Request) => req.query.as === 'html';
+
+/** Sends the report page as JSON { filename, html } when `pdf` is null, else the PDF file. */
+function sendReport(res: Response, page: string, pdf: Buffer | null, name: string) {
+  if (!pdf) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ filename: safeName(name), html: page });
+    return;
+  }
+  sendFile(res, pdf, 'application/pdf', `${name}.pdf`);
+}
+
 // Report URLs without a file extension: browsers / security software may intercept requests ending in .pdf.
 // The old '.pdf' / '.xlsx' paths stay for compatibility.
 reportsRouter.get(['/exams/:examId/gradesheets', '/exams/:examId/gradesheets.pdf'], async (req, res) => {
@@ -46,7 +63,8 @@ reportsRouter.get(['/exams/:examId/gradesheets', '/exams/:examId/gradesheets.pdf
     enrollmentIds: q.enrollmentId ? [q.enrollmentId] : undefined,
   });
   if (sheets.length === 0) throw notFound('Results for this selection');
-  const pdf = await renderPdf(gradeSheetsHtml(sheets, await logoDataUri()));
+  const page = gradeSheetsHtml(sheets, await logoDataUri());
+  const pdf = asHtml(req) ? null : await renderPdf(page);
   await recordAudit(prisma, ctxOf(req), {
     action: 'PRINT_GRADESHEETS',
     entity: 'exam',
@@ -54,7 +72,7 @@ reportsRouter.get(['/exams/:examId/gradesheets', '/exams/:examId/gradesheets.pdf
     after: { count: sheets.length, ...q },
   });
   const who = sheets.length === 1 ? sheets[0]!.student.fullName : `${sheets.length}-students`;
-  sendFile(res, pdf, 'application/pdf', `gradesheet_${exam.name}_G${exam.grade}_${who}.pdf`);
+  sendReport(res, page, pdf, `gradesheet_${exam.name}_G${exam.grade}_${who}`);
 });
 
 async function ledgerData(examId: number, q: z.output<typeof resultsQuery>) {
@@ -71,8 +89,9 @@ const ledgerPdf: RequestHandler = async (req, res) => {
   const q = parse(resultsQuery, req.query);
   const { exam, rows, subtitle } = await ledgerData(examId, q);
   const school = toSchoolInfo(await getSettingsRow());
-  const pdf = await renderPdf(ledgerHtml(school, toExamDto(exam), rows, subtitle), { landscape: true });
-  sendFile(res, pdf, 'application/pdf', `ledger_${exam.name}_G${exam.grade}.pdf`);
+  const page = ledgerHtml(school, toExamDto(exam), rows, subtitle);
+  const pdf = asHtml(req) ? null : await renderPdf(page, { landscape: true });
+  sendReport(res, page, pdf, `ledger_${exam.name}_G${exam.grade}`);
 };
 
 const ledgerXlsx: RequestHandler = async (req, res) => {

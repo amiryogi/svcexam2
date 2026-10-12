@@ -66,10 +66,11 @@ Tests use Vitest and never touch a database. `apps/api/vitest.config.ts` sets a 
 
 ## PDFs and reports
 
-- `modules/reports/reports.routes.ts` renders HTML templates (`pdf/templates/gradesheet.ts`, `ledger.ts`) to PDF with puppeteer-core (`pdf/browser.ts`). It uses system Chrome/Edge (or `CHROME_PATH`), falling back to `@sparticuz/chromium` on shared hosting. JavaScript and network requests are disabled in the renderer.
+- `modules/reports/reports.routes.ts` builds HTML report pages (`pdf/templates/gradesheet.ts`, `ledger.ts`). With `?as=html` it returns the page as JSON `{ filename, html }`, and the web app's `printReport()` prints it from a sandboxed iframe with the browser's print dialog. The production host (cPanel shared hosting) cannot run Chromium: its process limit is too low. Without `as=html`, the page is rendered to PDF with puppeteer-core and system Chrome/Edge (`pdf/browser.ts`, `CHROME_PATH`), with JavaScript and network requests disabled. That path works only where Chrome is installed (Docker, dev).
+- Templates must print correctly from a browser too: rely on `@page` for size and margins, and keep `print-color-adjust: exact` so backgrounds print.
 - Templates use the `html` tagged template from `pdf/html.ts`, which HTML-escapes every interpolation. Use `raw()` only for trusted constants such as CSS.
 - The grade sheet layout copies the school's official `Format of grade sheet.pdf` in the repo root.
-- `?as=base64` returns a report as JSON with base64 data. The web app always uses this, because Microsoft Edge blanks PDF bytes in fetched responses.
+- `?as=base64` returns a file (the Excel ledger) as JSON with base64 data, because Microsoft Edge blanks PDF bytes in fetched responses.
 
 ## Web architecture (`apps/web/src`)
 

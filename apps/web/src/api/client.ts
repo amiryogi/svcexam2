@@ -102,7 +102,6 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   return (await res.json()) as T;
 }
 
-/** Downloads a file response (PDF, XLSX) and saves it with the server-provided file name. */
 /**
  * Fetches a report file as base64 inside JSON (`as=base64`). Microsoft Edge recognises PDF bytes in a
  * fetched response and hands the page an empty body, so the raw file is never fetched directly.
@@ -116,6 +115,7 @@ async function fetchFile(path: string, query?: Query): Promise<{ blob: Blob; nam
   return { blob: new Blob([bytes], { type: r.mime }), name: r.filename };
 }
 
+/** Downloads a file response (the Excel ledger) and saves it with the server-provided file name. */
 export async function downloadFile(path: string, query?: Query): Promise<void> {
   const { blob, name } = await fetchFile(path, query);
   const url = URL.createObjectURL(blob);
@@ -128,29 +128,34 @@ export async function downloadFile(path: string, query?: Query): Promise<void> {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+let printFrame: HTMLIFrameElement | null = null;
+
 /**
- * Opens a PDF in a new tab for preview/printing. The tab is opened synchronously on the click (so
- * popup blockers allow it) and filled once the PDF arrives; if popups are blocked, it downloads instead.
+ * Prints a report (grade sheets, ledger) with the browser's print dialog, where "Save as PDF" makes the
+ * file. The server sends the report page itself (`as=html`) instead of rendering a PDF, so hosting
+ * without Chrome works. The page loads in a hidden iframe, sandboxed so it cannot run scripts.
  */
-export async function openPdf(path: string, query?: Query): Promise<void> {
-  const tab = window.open('', '_blank');
-  if (tab) tab.document.title = 'Preparing PDF…';
-  try {
-    const { blob, name } = await fetchFile(path, query);
-    const url = URL.createObjectURL(blob);
-    if (tab && !tab.closed) {
-      tab.location.href = url;
-    } else {
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = name;
-      a.click();
-    }
-    setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
-  } catch (e) {
-    tab?.close();
-    throw e;
-  }
+export async function printReport(path: string, query?: Query): Promise<void> {
+  const r = await api<{ filename: string; html: string }>(path, { query: { ...query, as: 'html' } });
+  printFrame?.remove();
+  const frame = document.createElement('iframe');
+  printFrame = frame;
+  frame.setAttribute('sandbox', 'allow-same-origin allow-modals');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:absolute;width:0;height:0;border:0;visibility:hidden';
+  await new Promise<void>((resolve) => {
+    frame.addEventListener('load', () => resolve(), { once: true });
+    frame.srcdoc = r.html;
+    document.body.appendChild(frame);
+  });
+  const win = frame.contentWindow;
+  if (!win) throw new ApiError(0, 'PRINT_FAILED', 'Could not open the print view. Please try again.');
+  // "Save as PDF" suggests the page title as the file name.
+  const appTitle = document.title;
+  document.title = win.document.title = r.filename;
+  win.addEventListener('afterprint', () => (document.title = appTitle), { once: true });
+  win.focus();
+  win.print();
 }
 
 export const errorMessage = (e: unknown): string =>

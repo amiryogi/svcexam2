@@ -29,7 +29,7 @@ export const markText = (c: { status: string; marks: number | null } | undefined
 
 const css = raw(`
 @page { size: A4 landscape; margin: 8mm; }
-body { font-family: Arial, "Liberation Sans", "Noto Sans", sans-serif; font-size: 7.5pt; margin: 0; color: #111; }
+body { font-family: Arial, "Liberation Sans", "Noto Sans", sans-serif; font-size: 7.5pt; margin: 0; color: #111; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 h1 { font-size: 13pt; margin: 0; text-align: center; text-transform: uppercase; }
 h2 { font-size: 10pt; margin: 2px 0 6px; text-align: center; font-weight: normal; }
 table { width: 100%; border-collapse: collapse; }

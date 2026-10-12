@@ -22,7 +22,7 @@ enrollment, terminal/final exams, mark entry, results and A4 grade-sheet printin
   - Saves automatically after you stop typing.
   - Uses optimistic locking: if two people edit the same cell, the second save is reported as a conflict instead of overwriting.
 - **Results**: computed live with the NEB rules. **Publishing freezes each student's grade sheet** as a snapshot, so later edits to names, subjects or the grade scale cannot change grade sheets that were already issued.
-- **Printing**: server-rendered A4 PDFs (one student, or a whole class in one file), plus a mark ledger as PDF (landscape) or Excel. Drafts print with a **PROVISIONAL** watermark.
+- **Printing**: A4 grade sheets (one student, or a whole class at once) and a landscape mark ledger, printed through the browser's print dialog ("Save as PDF" makes the file), plus the ledger as Excel. Drafts print with a **PROVISIONAL** watermark.
 - **Setup**: school details and logo, signatories, academic years, streams, subjects (NEB codes, credit hours, full marks), curriculum groups, grade scale, and administrator accounts.
 - **Audit log**: every change, sign-in, publish and print, with before/after values.
 
@@ -63,7 +63,7 @@ npm run dev:api                   # http://localhost:4000
 npm run dev:web                   # http://localhost:5173 (proxies /api to the API)
 ```
 
-PDF rendering uses a locally installed Chrome, Chromium or Edge. Common install paths are detected automatically; otherwise set `CHROME_PATH` in `apps/api/.env`.
+The web app prints reports in the browser: the API sends the report page (`?as=html`) and the browser's print dialog makes the PDF. The API can still render PDFs itself for direct report links, using a locally installed Chrome, Chromium or Edge. Common install paths are detected automatically; otherwise set `CHROME_PATH` in `apps/api/.env`.
 
 Quality checks: `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`.
 
@@ -122,7 +122,7 @@ The API runs on cPanel hosting with **Setup Node.js App** and **Terminal** (here
 
 ### API (cPanel)
 
-1. **Build the bundle** on your PC: `npm run build:deploy`. This creates `deploy/svi-api.zip`, which contains the compiled API, Prisma migrations, `@svi/shared`, PDF fonts, a lockfile and `app.cjs` (the Passenger startup file).
+1. **Build the bundle** on your PC: `npm run build:deploy`. This creates `deploy/svi-api.zip`, which contains the compiled API, Prisma migrations, `@svi/shared`, a lockfile and `app.cjs` (the Passenger startup file).
 2. **Subdomain:** in cPanel, go to *Domains*, create `api.nevanhandicraft.com.np`, and run *SSL/TLS Status → Run AutoSSL*.
 3. **Database:** in *MySQL Databases*, create a database and a user, and add the user to the database with ALL PRIVILEGES. The real names carry your cPanel prefix, e.g. `cpuser_svi`.
 4. **Upload:** in *File Manager*, create `/home/<cpuser>/svi-api` (outside `public_html`), upload `svi-api.zip` there and extract it. Also create `/home/<cpuser>/svi-storage`, where uploaded logos are stored.
@@ -151,9 +151,11 @@ The API runs on cPanel hosting with **Setup Node.js App** and **Terminal** (here
    ```
 7. **Restart** the app. `https://api.nevanhandicraft.com.np/api/v1/health` should return `{"status":"ok"}`.
 
-**PDFs:** shared hosting has no Chrome, so the API uses `@sparticuz/chromium`, a self-contained headless Chromium installed with the app. It renders one PDF at a time and is extracted to the temp folder the first time it's used. If PDFs fail with "PDF rendering failed to start", check the app's `stderr.log`:
-- If it complains about a missing library (e.g. `libnss3.so`), add `CHROME_BUNDLED_LIBS=true` and restart.
-- If Chromium is being killed for memory or process limits, ask the host to raise the account's limits. Otherwise, move the API to a VPS (see the Docker section above).
+**Printing:** grade sheets and ledgers are printed by the user's browser, so the server never runs Chrome. Shared hosting's process limit (about 100 threads per account on NestNepal, shared by all of the account's Node apps) is too low for headless Chromium, which needs about 50 threads. Direct PDF links to the API therefore fail there with "PDF rendering is not configured".
+
+**Shared-hosting gotchas we hit:**
+- Imunify360 bot-protection can block requests coming through Vercel's proxy with a 403 `Access denied by Imunify360 bot-protection`. Ask the host to disable it for the API subdomain.
+- If cPanel Terminal or Setup Node.js App fail with `Resource temporarily unavailable`, the account is at its process limit. `kill -9 -1` in Terminal (a shell built-in, so it still works) ends all of the account's processes, and the Node apps restart on their next request.
 
 ### Web app (Vercel)
 
@@ -166,14 +168,14 @@ Logins only work on the production URL. Vercel preview deployments have other ad
 ### Checks after the first deploy
 
 - Open the **Audit** page and check that the IP address on your own sign-in is your real public IP. If it shows a Vercel or `127.0.0.1` address, change `TRUST_PROXY` (try `1` or `3`) and restart. The login rate limiter depends on this IP.
-- Open a grade sheet and a ledger PDF. Reload a deep link such as `/students` and check that you're still signed in.
+- Print a grade sheet and a ledger. Reload a deep link such as `/students` and check that you're still signed in.
 - Backups: turn on the host's database backups (e.g. JetBackup in cPanel), or download a copy regularly from *phpMyAdmin → Export*.
 
 ### Updating
 
 - **Web:** push to the Git branch Vercel deploys from.
 - **API:** run `npm run build:deploy`, upload `svi-api.zip` and extract it over `svi-api` (this overwrites `dist/` and `prisma/`). Click **Run NPM Install** if dependencies changed, run `npx prisma migrate deploy` in Terminal if there are new migrations, then click **Restart**.
-- Very large class-wide PDF exports can hit Vercel's proxy timeout. If one fails with a 504 error, export in smaller batches.
+- Very large class-wide prints can hit Vercel's proxy timeout. If one fails with a 504 error, print by stream or section.
 
 ## Security summary
 
@@ -183,7 +185,7 @@ Logins only work on the production URL. Vercel preview deployments have other ad
 - **CSRF:** a synchronizer token (`X-CSRF-Token`), plus Origin/Referer checks, plus SameSite=Strict.
 - **Login protection:** per-IP+username rate limiting, and the account locks after 5 failures for 15 minutes. Error messages are generic, and response times are the same for unknown and known usernames.
 - **Validation:** every input is validated with Zod and all queries are parameterised (Prisma). Every value in PDF templates is HTML-escaped. Uploaded logos are checked by magic bytes.
-- **PDF rendering:** Chromium runs with JavaScript disabled and every network request blocked.
+- **Report printing:** the web app loads report pages into a sandboxed iframe that cannot run scripts. Server-side PDF rendering (where Chrome is installed) runs Chromium with JavaScript disabled and every network request blocked.
 - **Headers and logs:** Helmet with `default-src 'none'` on the API and a strict CSP on the SPA. Logs (pino) redact cookies and CSRF tokens.
 
 **Planned next:** TOTP two-factor login for admins, and a Playwright end-to-end suite in CI.

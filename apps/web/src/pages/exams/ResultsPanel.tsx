@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { FileDown, FileSpreadsheet, Printer } from 'lucide-react';
+import { FileSpreadsheet, Printer } from 'lucide-react';
 import { useState } from 'react';
 import { formatGp, hasMissingMarks, type ExamDto, type ResultRow } from '@svi/shared';
-import { downloadFile, openPdf, api } from '../../api/client';
+import { downloadFile, printReport, api } from '../../api/client';
 import { useStreams } from '../../api/hooks';
 import { Alert, Badge, Button, Card, CardHeader, EmptyState, ErrorBlock, Input, LoadingBlock, Select, Table, Td, Th } from '../../components/ui';
 import { toastError } from '../../lib/forms';
@@ -45,11 +45,11 @@ export function ResultsPanel({ exam }: { exam: ExamDto }) {
         description={published ? 'Published results – frozen at the time of publishing.' : 'Live results – grade sheets print as PROVISIONAL until the exam is published.'}
         actions={
           <>
-            <Button variant="secondary" loading={busy === 'sheets'} onClick={() => run('sheets', () => openPdf(`/reports/exams/${exam.id}/gradesheets`, filters))}>
-              <Printer className="size-4" /> Grade sheets (PDF)
+            <Button variant="secondary" loading={busy === 'sheets'} onClick={() => run('sheets', () => printReport(`/reports/exams/${exam.id}/gradesheets`, filters))}>
+              <Printer className="size-4" /> Print grade sheets
             </Button>
-            <Button variant="secondary" loading={busy === 'ledger'} onClick={() => run('ledger', () => downloadFile(`/reports/exams/${exam.id}/ledger`, { ...filters, format: 'pdf' }))}>
-              <FileDown className="size-4" /> Ledger PDF
+            <Button variant="secondary" loading={busy === 'ledger'} onClick={() => run('ledger', () => printReport(`/reports/exams/${exam.id}/ledger`, filters))}>
+              <Printer className="size-4" /> Print ledger
             </Button>
             <Button variant="secondary" loading={busy === 'xlsx'} onClick={() => run('xlsx', () => downloadFile(`/reports/exams/${exam.id}/ledger`, { ...filters, format: 'xlsx' }))}>
               <FileSpreadsheet className="size-4" /> Ledger Excel
@@ -70,6 +70,9 @@ export function ResultsPanel({ exam }: { exam: ExamDto }) {
             <Badge color="amber">Incomplete {summary.INCOMPLETE}</Badge>
           </div>
         )}
+        <p className="w-full text-xs text-slate-500">
+          Printing opens your browser's print window. To keep a file, choose <b>Save as PDF</b>. Under <b>More settings</b>, untick <b>Headers and footers</b> (the browser remembers this).
+        </p>
       </div>
       {q.isPending ? (
         <LoadingBlock />
@@ -125,7 +128,7 @@ export function ResultsPanel({ exam }: { exam: ExamDto }) {
                         size="sm"
                         variant="ghost"
                         title="Grade sheet"
-                        onClick={() => run(`one-${r.enrollmentId}`, () => openPdf(`/reports/exams/${exam.id}/gradesheets`, { enrollmentId: r.enrollmentId }))}
+                        onClick={() => run(`one-${r.enrollmentId}`, () => printReport(`/reports/exams/${exam.id}/gradesheets`, { enrollmentId: r.enrollmentId }))}
                         loading={busy === `one-${r.enrollmentId}`}
                       >
                         <Printer className="size-4" />

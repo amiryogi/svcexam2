@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FileDown, Pencil, RotateCcw, Trash2 } from 'lucide-react';
+import { Pencil, Printer, RotateCcw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { toast } from 'sonner';
 import type { ExamDto } from '@svi/shared';
-import { api, downloadFile } from '../../api/client';
+import { api, printReport } from '../../api/client';
 import type { StudentDetail } from '../../api/types';
 import { Badge, Button, Card, CardHeader, ConfirmDialog, EmptyState, ErrorBlock, LoadingBlock, PageHeader, Table, Td, Th } from '../../components/ui';
 import { EXAM_STATUS_COLOR, EXAM_STATUS_LABEL, gradeLabel, titleCase } from '../../lib/format';
@@ -32,12 +32,12 @@ function EnrollmentExams({ enrollment }: { enrollment: StudentDetail['enrollment
           key={e.id}
           size="sm"
           variant="secondary"
-          title={e.status === 'PUBLISHED' || e.status === 'LOCKED' ? 'Download grade sheet' : 'Provisional grade sheet'}
+          title={e.status === 'PUBLISHED' || e.status === 'LOCKED' ? 'Print grade sheet' : 'Print provisional grade sheet'}
           onClick={() =>
-            downloadFile(`/reports/exams/${e.id}/gradesheets`, { enrollmentId: enrollment.id }).catch(toastError)
+            printReport(`/reports/exams/${e.id}/gradesheets`, { enrollmentId: enrollment.id }).catch(toastError)
           }
         >
-          <FileDown className="size-3.5" /> {e.name}
+          <Printer className="size-3.5" /> {e.name}
           <Badge color={EXAM_STATUS_COLOR[e.status]}>{EXAM_STATUS_LABEL[e.status]}</Badge>
         </Button>
       ))}
