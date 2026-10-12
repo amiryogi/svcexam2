@@ -49,7 +49,7 @@ export function ExamsPage() {
                   <Td><Link to={`/exams/${e.id}`} className="font-medium text-brand-800 hover:underline">{e.name}</Link></Td>
                   <Td>{e.academicYear}</Td>
                   <Td>{gradeLabel(e.grade)}</Td>
-                  <Td>{titleCase(e.type)}</Td>
+                  <Td><span className="flex flex-wrap items-center gap-2">{titleCase(e.type)}{!e.includeInternal && <Badge>Theory only</Badge>}</span></Td>
                   <Td>{e.effectiveYearBs} B.S. ({e.effectiveYearAd})</Td>
                   <Td><Badge color={EXAM_STATUS_COLOR[e.status]}>{EXAM_STATUS_LABEL[e.status]}</Badge></Td>
                 </tr>

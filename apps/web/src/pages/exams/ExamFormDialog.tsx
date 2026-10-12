@@ -4,11 +4,11 @@ import { useEffect } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 import type { z } from 'zod';
-import { EXAM_TYPES, examSchema, examYears, type ExamDto, type ExamInput } from '@svi/shared';
+import { EXAM_TYPES, examSchema, examYears, INTERNAL_REQUIRED_EXAM_TYPES, type ExamDto, type ExamInput, type ExamType } from '@svi/shared';
 import { api } from '../../api/client';
 import { useAcademicYears } from '../../api/hooks';
 import type { Enrollment } from '../../api/types';
-import { Alert, Button, Field, Input, Modal, Select, Textarea } from '../../components/ui';
+import { Alert, Button, Checkbox, Field, Input, Modal, Select, Textarea } from '../../components/ui';
 import { gradeLabel, titleCase } from '../../lib/format';
 import { applyServerErrors } from '../../lib/forms';
 
@@ -26,6 +26,8 @@ export function ExamFormDialog({ open, onClose, exam }: { open: boolean; onClose
   const yearName = years.data?.find((y) => y.id === Number(selectedYearId))?.name ?? exam?.academicYear ?? '';
   const derived = examYears(null, null, yearName);
   const selectedGrade = Number(useWatch({ control, name: 'grade' }));
+  // Send-up and final exams always count internal marks; terminal exams may be theory only.
+  const internalRequired = INTERNAL_REQUIRED_EXAM_TYPES.includes(useWatch({ control, name: 'type' }) as ExamType);
 
   // Students per grade in the chosen year, so an exam is never created for an empty class.
   const enrolled = useQuery({
@@ -60,6 +62,7 @@ export function ExamFormDialog({ open, onClose, exam }: { open: boolean; onClose
             examYearAd: exam.examYearAd ?? '',
             resultDateBs: exam.resultDateBs ?? '',
             issueDateBs: exam.issueDateBs ?? '',
+            includeInternal: exam.includeInternal,
             remarks: exam.remarks ?? '',
           }
         : {
@@ -71,6 +74,7 @@ export function ExamFormDialog({ open, onClose, exam }: { open: boolean; onClose
             examYearAd: '',
             resultDateBs: '',
             issueDateBs: '',
+            includeInternal: false,
             remarks: '',
           },
     );
@@ -89,6 +93,9 @@ export function ExamFormDialog({ open, onClose, exam }: { open: boolean; onClose
       toast.success(exam ? 'Exam updated' : 'Exam created');
       await qc.invalidateQueries({ queryKey: ['exams'] });
       await qc.invalidateQueries({ queryKey: ['exam'] });
+      // Turning internal marks on or off changes which components take marks.
+      await qc.invalidateQueries({ queryKey: ['exam-components'] });
+      await qc.invalidateQueries({ queryKey: ['exam-progress'] });
       onClose();
     },
     onError: (e) => applyServerErrors(e, form.setError),
@@ -141,6 +148,18 @@ export function ExamFormDialog({ open, onClose, exam }: { open: boolean; onClose
         <Field label="Type" required error={err.type?.message}>
           <Select disabled={published} {...register('type')}>{EXAM_TYPES.map((t) => <option key={t} value={t}>{titleCase(t)}</option>)}</Select>
         </Field>
+        <div className="sm:col-span-2">
+          {internalRequired ? (
+            <Checkbox label="Include internal (practical) marks" checked disabled readOnly />
+          ) : (
+            <Checkbox label="Include internal (practical) marks" disabled={published} {...register('includeInternal')} />
+          )}
+          <p className="mt-1 text-xs text-slate-500">
+            {internalRequired
+              ? 'Send-up and final exams always include theory and internal marks.'
+              : 'Leave unticked for a theory-only exam: only theory marks are entered and printed on ledgers and grade sheets.'}
+          </p>
+        </div>
         <Field label="Conducted in (B.S. year)" error={err.examYearBs?.message} hint={`Leave blank to use the academic year (${derived.bs})`}>
           <Input placeholder={derived.bs} {...register('examYearBs')} />
         </Field>

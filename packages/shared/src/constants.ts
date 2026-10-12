@@ -20,6 +20,8 @@ export const COMPONENT_LABEL: Record<ComponentType, string> = { TH: 'Theory', IN
 
 export const EXAM_TYPES = ['TERMINAL', 'SENDUP', 'FINAL'] as const;
 export type ExamType = (typeof EXAM_TYPES)[number];
+/** Exam types whose results always include internal (practical) marks as well as theory. */
+export const INTERNAL_REQUIRED_EXAM_TYPES: readonly ExamType[] = ['SENDUP', 'FINAL'];
 
 export const EXAM_STATUSES = ['DRAFT', 'MARK_ENTRY', 'PUBLISHED', 'LOCKED'] as const;
 export type ExamStatus = (typeof EXAM_STATUSES)[number];

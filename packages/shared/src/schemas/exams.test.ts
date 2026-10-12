@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { examSchema, examYears } from './exams.js';
+import { examIncludesInternal, examSchema, examYears } from './exams.js';
 
 describe('examYears', () => {
   it('derives the printed year from the academic year', () => {
@@ -16,5 +16,17 @@ describe('examYears', () => {
     const r = examSchema.parse({ academicYearId: 1, grade: 11, name: 'Final', type: 'FINAL', examYearBs: '', examYearAd: '' });
     expect(r.examYearBs).toBeNull();
     expect(r.examYearAd).toBeNull();
+  });
+});
+
+describe('examIncludesInternal', () => {
+  it('always includes internal marks in send-up and final exams', () => {
+    expect(examIncludesInternal('FINAL', false)).toBe(true);
+    expect(examIncludesInternal('SENDUP', false)).toBe(true);
+  });
+
+  it('follows the exam setting for terminal exams', () => {
+    expect(examIncludesInternal('TERMINAL', false)).toBe(false);
+    expect(examIncludesInternal('TERMINAL', true)).toBe(true);
   });
 });

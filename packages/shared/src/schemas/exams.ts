@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { EXAM_STATUSES, EXAM_TYPES, MARK_STATUSES } from '../constants.js';
+import { EXAM_STATUSES, EXAM_TYPES, INTERNAL_REQUIRED_EXAM_TYPES, MARK_STATUSES, type ExamType } from '../constants.js';
 import { bsDateSchema, decimal, gradeLevelSchema, idSchema, optionalText, requiredText } from './common.js';
 
 export const examSchema = z.object({
@@ -13,6 +13,8 @@ export const examSchema = z.object({
   resultDateBs: bsDateSchema.nullish().or(z.literal('').transform(() => null)),
   issueDateBs: bsDateSchema.nullish().or(z.literal('').transform(() => null)),
   gradeScaleId: idSchema.optional(),
+  /** Terminal exams only; send-up and final exams always include internal marks (see examIncludesInternal()). */
+  includeInternal: z.boolean().optional(),
   remarks: optionalText(500),
 });
 export type ExamInput = z.input<typeof examSchema>;
@@ -33,6 +35,11 @@ export function examYears(examYearBs: string | null, examYearAd: string | null, 
   const bs = examYearBs ?? academicYear.match(/\d{4}/)?.[0] ?? academicYear;
   const ad = examYearAd ?? (/^\d{4}$/.test(bs) ? String(Number(bs) - 57) : '');
   return { bs, ad };
+}
+
+/** Whether internal (practical) marks count in the exam: always for send-up / final, optional for terminal exams. */
+export function examIncludesInternal(type: ExamType, includeInternal: boolean): boolean {
+  return INTERNAL_REQUIRED_EXAM_TYPES.includes(type) || includeInternal;
 }
 
 export const examListQuery = z.object({

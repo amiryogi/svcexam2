@@ -1,5 +1,5 @@
 import type { AcademicYear, Exam } from '@prisma/client';
-import { examYears, type EffectiveExamComponent, type ExamDto } from '@svi/shared';
+import { examIncludesInternal, examYears, INTERNAL_REQUIRED_EXAM_TYPES, type EffectiveExamComponent, type ExamDto } from '@svi/shared';
 import { conflict, notFound } from '../../lib/errors.js';
 import { n, type Db } from '../../lib/prisma.js';
 
@@ -20,6 +20,7 @@ export const toExamDto = (e: Exam & { academicYear: AcademicYear }): ExamDto => 
   issueDateBs: e.issueDateBs,
   status: e.status,
   gradeScaleId: e.gradeScaleId,
+  includeInternal: examIncludesInternal(e.type, e.includeInternal),
   remarks: e.remarks,
   publishedAt: e.publishedAt?.toISOString() ?? null,
   };
@@ -40,6 +41,7 @@ export function assertStatus(exam: Exam, allowed: Exam['status'][], action: stri
 /**
  * Subject components for the exam's grade with per-exam overrides applied.
  * Components without an override use the subject's full mark / pass percent and are included.
+ * Send-up and final exams include every component; theory-only terminal exams leave out internal ones.
  */
 export async function effectiveComponents(db: Db, exam: Exam): Promise<EffectiveExamComponent[]> {
   const [components, overrides] = await Promise.all([
@@ -51,6 +53,7 @@ export async function effectiveComponents(db: Db, exam: Exam): Promise<Effective
     db.examComponent.findMany({ where: { examId: exam.id } }),
   ]);
   const byId = new Map(overrides.map((o) => [o.subjectComponentId, o]));
+  const allRequired = INTERNAL_REQUIRED_EXAM_TYPES.includes(exam.type);
   return components
     .filter((c) => c.subject.isActive || byId.has(c.id))
     .map((c) => {
@@ -64,7 +67,7 @@ export async function effectiveComponents(db: Db, exam: Exam): Promise<Effective
         creditHour: n(c.creditHour),
         fullMark: n(o?.fullMark ?? c.fullMark),
         passPercent: n(o?.passPercent ?? c.passPercent),
-        included: o?.included ?? true,
+        included: allRequired || ((c.type === 'TH' || exam.includeInternal) && (o?.included ?? true)),
         overridden: Boolean(o),
       };
     });

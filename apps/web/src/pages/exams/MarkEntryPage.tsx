@@ -266,7 +266,7 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
           {editable && <Button size="sm" disabled={!savable.length} loading={save.isPending} onClick={() => save.mutate(savable)}>Save now</Button>}
         </div>
       </div>
-      {!editable && <ReadOnlyNotice exam={grid.data.exam} included={component.included} />}
+      {!editable && <ReadOnlyNotice exam={grid.data.exam} included={component.included} type={component.type} />}
       {rows.length === 0 ? (
         <EmptyClass exam={grid.data.exam} streamId={streamId} section={section} />
       ) : (
@@ -384,14 +384,17 @@ function EmptyClass({ exam, streamId, section }: { exam: MarksGrid['exam']; stre
 }
 
 /** Explains why marks can't be edited and how to make them editable. */
-function ReadOnlyNotice({ exam, included }: { exam: MarksGrid['exam']; included: boolean }) {
+function ReadOnlyNotice({ exam, included, type }: { exam: MarksGrid['exam']; included: boolean; type: MarksGrid['component']['type'] }) {
   const open = (
     <Link to={`/exams/${exam.id}`} className="mt-2 inline-block">
       <Button size="sm" variant="secondary">Open {exam.name}</Button>
     </Link>
   );
   let body: React.ReactNode;
-  if (!included) {
+  const theoryOnly = !included && type === 'IN' && !exam.includeInternal;
+  if (theoryOnly) {
+    body = <>"{exam.name}" is a theory-only exam, so internal marks are not entered. To include them, open the exam, click <b>Edit</b> and tick <b>Include internal (practical) marks</b>.</>;
+  } else if (!included) {
     body = <>This component is left out of "{exam.name}" (see the exam's <b>Full marks &amp; components</b> tab), so it takes no marks.</>;
   } else if (exam.status === 'PUBLISHED') {
     body = (
@@ -412,7 +415,7 @@ function ReadOnlyNotice({ exam, included }: { exam: MarksGrid['exam']; included:
     <div className="px-5 pt-4">
       <Alert tone="amber">
         {body}
-        {included && exam.status !== 'LOCKED' && <div>{open}</div>}
+        {(included || theoryOnly) && exam.status !== 'LOCKED' && <div>{open}</div>}
       </Alert>
     </div>
   );

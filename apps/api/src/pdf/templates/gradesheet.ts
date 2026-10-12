@@ -53,12 +53,16 @@ tbody.subject:first-of-type td.span { border-top: 0; }
 .watermark { position: absolute; top: 38%; left: 0; right: 0; text-align: center; font-size: 64pt; color: rgba(200,0,0,.12); transform: rotate(-28deg); font-weight: bold; }
 `);
 
-export const DEFAULT_GRADESHEET_NOTE = [
-  'Note : 1 Credit Hour is equal to 32 working hours.',
+const NOTE_CREDIT_HOUR = 'Note : 1 Credit Hour is equal to 32 working hours.';
+const NOTE_INTERNAL = [
   'IN (Internal) : Project work, Practical, Presentation, Community Work, Presentation,',
   '            Terminal Examinations',
-  'TH (Theory): Written External Examination',
-].join('\n');
+];
+const NOTE_THEORY = 'TH (Theory): Written External Examination';
+
+export const DEFAULT_GRADESHEET_NOTE = [NOTE_CREDIT_HOUR, ...NOTE_INTERNAL, NOTE_THEORY].join('\n');
+/** Default note for theory-only terminal exams, which print no internal rows. */
+export const THEORY_ONLY_GRADESHEET_NOTE = [NOTE_CREDIT_HOUR, NOTE_THEORY].join('\n');
 
 const DOTS = '....................................................';
 
@@ -147,7 +151,7 @@ function sheet(d: GradeSheetData, logo: string | null): SafeHtml {
       </div>
     </div>
     <div class="rule"></div>
-    <div class="note">${school.gradesheetNote ?? DEFAULT_GRADESHEET_NOTE}</div>
+    <div class="note">${school.gradesheetNote ?? (exam.theoryOnly ? THEORY_ONLY_GRADESHEET_NOTE : DEFAULT_GRADESHEET_NOTE)}</div>
   </section>`;
 }
 

@@ -3,7 +3,7 @@ import { CheckCircle2, Lock, NotebookPen, Pencil, RotateCcw, Send, Trash2, Unloc
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
-import type { EffectiveExamComponent, ExamProgressItem, ExamStatus } from '@svi/shared';
+import { INTERNAL_REQUIRED_EXAM_TYPES, type EffectiveExamComponent, type ExamDto, type ExamProgressItem, type ExamStatus } from '@svi/shared';
 import { api, ApiError } from '../../api/client';
 import { qk, useExam } from '../../api/hooks';
 import { useAuth } from '../../auth/AuthProvider';
@@ -29,7 +29,7 @@ export function ExamDetailPage() {
     <>
       <PageHeader
         title={<span className="flex flex-wrap items-center gap-3">{e.name} <Badge color={EXAM_STATUS_COLOR[e.status]}>{EXAM_STATUS_LABEL[e.status]}</Badge></span>}
-        description={`${gradeLabel(e.grade)} · ${e.academicYear} · ${titleCase(e.type)} · conducted ${e.effectiveYearBs} B.S. (${e.effectiveYearAd} A.D.)${e.issueDateBs ? ` · issue date ${e.issueDateBs}` : ''}`}
+        description={`${gradeLabel(e.grade)} · ${e.academicYear} · ${titleCase(e.type)} · ${e.includeInternal ? 'theory + internal' : 'theory only'} · conducted ${e.effectiveYearBs} B.S. (${e.effectiveYearAd} A.D.)${e.issueDateBs ? ` · issue date ${e.issueDateBs}` : ''}`}
         actions={
           <>
             {e.status !== 'LOCKED' && (
@@ -49,7 +49,7 @@ export function ExamDetailPage() {
         onChange={setTab}
       />
       {tab === 'progress' && <ProgressPanel examId={id} status={e.status} />}
-      {tab === 'components' && <ComponentsPanel examId={id} editable={e.status === 'DRAFT' || e.status === 'MARK_ENTRY'} />}
+      {tab === 'components' && <ComponentsPanel exam={e} />}
       {tab === 'results' && <ResultsPanel exam={e} />}
       <ExamFormDialog open={editOpen} onClose={() => setEditOpen(false)} exam={e} />
     </>
@@ -245,22 +245,28 @@ function ProgressPanel({ examId, status }: { examId: number; status: ExamStatus 
   );
 }
 
-function ComponentsPanel({ examId, editable }: { examId: number; editable: boolean }) {
+function ComponentsPanel({ exam }: { exam: ExamDto }) {
+  const examId = exam.id;
   const q = useQuery({ queryKey: ['exam-components', examId], queryFn: () => api<EffectiveExamComponent[]>(`/exams/${examId}/components`) });
   if (q.isPending) return <LoadingBlock />;
   if (q.isError) return <ErrorBlock error={q.error} />;
-  return <ComponentsEditor key={q.dataUpdatedAt} examId={examId} editable={editable} initial={q.data} />;
+  return <ComponentsEditor key={q.dataUpdatedAt} exam={exam} initial={q.data} />;
 }
 
-function ComponentsEditor({ examId, editable, initial }: { examId: number; editable: boolean; initial: EffectiveExamComponent[] }) {
+function ComponentsEditor({ exam, initial }: { exam: ExamDto; initial: EffectiveExamComponent[] }) {
   const qc = useQueryClient();
   const [rows, setRows] = useState(initial);
+  const examId = exam.id;
+  const editable = exam.status === 'DRAFT' || exam.status === 'MARK_ENTRY';
+  // Send-up / final exams count every component; theory-only exams leave out every internal one.
+  const allRequired = INTERNAL_REQUIRED_EXAM_TYPES.includes(exam.type);
+  const lockedOut = (r: EffectiveExamComponent) => r.type === 'IN' && !exam.includeInternal;
 
   const save = useMutation({
     mutationFn: () =>
       api<EffectiveExamComponent[]>(`/exams/${examId}/components`, {
         method: 'PUT',
-        body: { items: rows.map((r) => ({ subjectComponentId: r.subjectComponentId, fullMark: r.fullMark, passPercent: r.passPercent, included: r.included })) },
+        body: { items: rows.filter((r) => !lockedOut(r)).map((r) => ({ subjectComponentId: r.subjectComponentId, fullMark: r.fullMark, passPercent: r.passPercent, included: r.included })) },
       }),
     onSuccess: async () => {
       toast.success('Components saved');
@@ -277,7 +283,13 @@ function ComponentsEditor({ examId, editable, initial }: { examId: number; edita
     <Card>
       <CardHeader
         title="Full marks for this exam"
-        description="Defaults come from the subject setup. Terminal exams can use different full marks or leave out internal marks."
+        description={
+          allRequired
+            ? 'Defaults come from the subject setup. Send-up and final exams include every theory and internal component.'
+            : exam.includeInternal
+              ? 'Defaults come from the subject setup. Terminal exams can use different full marks or leave out components.'
+              : 'Theory-only exam: internal marks are left out. To include them, click Edit and tick "Include internal (practical) marks".'
+        }
         actions={editable && <Button loading={save.isPending} onClick={() => save.mutate()}>Save changes</Button>}
       />
       <Table>
@@ -291,9 +303,9 @@ function ComponentsEditor({ examId, editable, initial }: { examId: number; edita
               <Td>{r.subjectName}</Td>
               <Td>{r.type === 'TH' ? 'Theory' : 'Internal'}</Td>
               <Td>{r.creditHour.toFixed(2)}</Td>
-              <Td><Input type="number" className="w-24 py-1" disabled={!editable} value={r.fullMark} min={1} onChange={(e) => update(r.subjectComponentId, { fullMark: Number(e.target.value) })} /></Td>
-              <Td><Input type="number" className="w-20 py-1" disabled={!editable} value={r.passPercent} min={0} max={100} onChange={(e) => update(r.subjectComponentId, { passPercent: Number(e.target.value) })} /></Td>
-              <Td><input type="checkbox" className="size-4" disabled={!editable} checked={r.included} onChange={(e) => update(r.subjectComponentId, { included: e.target.checked })} /></Td>
+              <Td><Input type="number" className="w-24 py-1" disabled={!editable || lockedOut(r)} value={r.fullMark} min={1} onChange={(e) => update(r.subjectComponentId, { fullMark: Number(e.target.value) })} /></Td>
+              <Td><Input type="number" className="w-20 py-1" disabled={!editable || lockedOut(r)} value={r.passPercent} min={0} max={100} onChange={(e) => update(r.subjectComponentId, { passPercent: Number(e.target.value) })} /></Td>
+              <Td><input type="checkbox" className="size-4" disabled={!editable || allRequired || lockedOut(r)} checked={r.included} onChange={(e) => update(r.subjectComponentId, { included: e.target.checked })} /></Td>
             </tr>
           ))}
         </tbody>

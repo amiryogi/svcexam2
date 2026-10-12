@@ -85,6 +85,8 @@ export interface ExamDto {
   issueDateBs: string | null;
   status: ExamStatus;
   gradeScaleId: number;
+  /** Effective value: true for send-up / final exams, the exam's own setting for terminal exams. */
+  includeInternal: boolean;
   remarks: string | null;
   publishedAt: string | null;
 }
@@ -168,6 +170,8 @@ export interface GradeSheetData {
     examYearAd: string;
     resultDateBs: string | null;
     issueDateBs: string | null;
+    /** Terminal exam printed with theory marks only (absent on older snapshots). */
+    theoryOnly?: boolean;
   };
   student: StudentRef;
   result: ExamResult;

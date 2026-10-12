@@ -338,6 +338,8 @@ model Exam {
   issueDateBs    String?          @map("issue_date_bs") @db.Char(10)
   status         ExamStatus       @default(DRAFT)
   gradeScaleId   Int              @map("grade_scale_id")
+  /// Terminal exams only: false = theory marks only. Send-up and final exams always include internal.
+  includeInternal Boolean         @default(true) @map("include_internal")
   remarks        String?          @db.VarChar(500)
   publishedAt    DateTime?        @map("published_at")
   createdAt      DateTime         @default(now()) @map("created_at")

@@ -3,7 +3,9 @@ import { z } from 'zod';
 import {
   EXAM_PRINT_FIELDS,
   EXAM_STATUS_TRANSITIONS,
+  INTERNAL_REQUIRED_EXAM_TYPES,
   examComponentsSchema,
+  examIncludesInternal,
   examListQuery,
   examSchema,
   examStatusSchema,
@@ -52,6 +54,8 @@ examsRouter.post('/', async (req, res) => {
         examYearAd: input.examYearAd ?? null,
         resultDateBs: input.resultDateBs ?? null,
         issueDateBs: input.issueDateBs ?? null,
+        // New terminal exams are theory only unless internal marks are asked for.
+        includeInternal: examIncludesInternal(input.type, input.includeInternal ?? false),
         gradeScaleId: input.gradeScaleId ?? (await defaultGradeScaleId(tx)),
       },
       include: { academicYear: true },
@@ -67,7 +71,11 @@ examsRouter.put('/:id', async (req, res) => {
   const input = parse(examUpdateSchema, req.body);
   const exam = await prisma.$transaction(async (tx) => {
     const before = await getExam(tx, id);
-    let data = input;
+    let data: typeof input = {
+      ...input,
+      // Switching to send-up / final turns internal marks on; turning them off keeps entered marks, they are just not counted.
+      includeInternal: examIncludesInternal(input.type ?? before.type, input.includeInternal ?? before.includeInternal),
+    };
     if (before.status === 'PUBLISHED') {
       // Only print details may change after publishing; results stay frozen.
       const isPrintField = (k: string) => (EXAM_PRINT_FIELDS as readonly string[]).includes(k);
@@ -123,12 +131,18 @@ examsRouter.put('/:id/components', async (req, res) => {
   const result = await prisma.$transaction(async (tx) => {
     const exam = await getExam(tx, id);
     assertStatus(exam, ['DRAFT', 'MARK_ENTRY'], 'change exam components');
+    const allRequired = INTERNAL_REQUIRED_EXAM_TYPES.includes(exam.type);
+    if (allRequired && items.some((i) => !i.included)) {
+      throw conflict('Send-up and final exams must include every theory and internal component');
+    }
     const defaults = new Map(
       (await tx.subjectComponent.findMany({ where: { id: { in: items.map((i) => i.subjectComponentId) } } })).map((c) => [c.id, c]),
     );
     for (const item of items) {
       const d = defaults.get(item.subjectComponentId);
       if (!d) throw notFound(`Subject component ${item.subjectComponentId}`);
+      // A theory-only exam ignores internal components; keep their settings for when internal is turned back on.
+      if (d.type === 'IN' && !examIncludesInternal(exam.type, exam.includeInternal)) continue;
       const isDefault = item.included && Number(d.fullMark) === item.fullMark && Number(d.passPercent) === item.passPercent;
       const where = { examId_subjectComponentId: { examId: id, subjectComponentId: item.subjectComponentId } };
       if (isDefault) {
