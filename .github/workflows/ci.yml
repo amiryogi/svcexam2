@@ -24,8 +24,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - name: Dependency audit (production deps)
-        run: npm audit --omit=dev --audit-level=high
+      - name: Dependency audit (production deps, high+, minus reviewed advisories)
+        run: node scripts/audit-prod.mjs
 
   docker:
     runs-on: ubuntu-latest

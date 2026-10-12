@@ -11,6 +11,7 @@ npm ci                              # install all workspaces; postinstall runs `
 npm run dev:api                     # API on :4000 (tsx watch; needs apps/api/.env and MySQL)
 npm run dev:web                     # web on :5173, proxies /api to API_TARGET or localhost:4000
 npm run typecheck | lint | test | build   # what CI runs (.github/workflows/ci.yml)
+node scripts/audit-prod.mjs         # CI's prod dependency audit (high+); reviewed advisories are listed in it
 npm run build:deploy                # deploy/svi-api.zip for cPanel hosting (scripts/build-api-deploy.mjs)
 
 # single test file / single test
