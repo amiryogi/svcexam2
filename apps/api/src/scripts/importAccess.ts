@@ -12,6 +12,11 @@
  * Idempotent: students are matched by NEB registration number, then admission number (an admission
  * number already used by a different student aborts the import); enrollments by (student, year);
  * marks by (exam, enrollment, component). --dry-run rolls everything back at the end.
+ *
+ * Students already enrolled in the same grade in another year abort the import too: that usually
+ * means the wrong year's files were uploaded. Real repeaters are let through with --allow-repeaters.
+ *
+ * Step-by-step guide for the yearly import on the server: tools/import-access/IMPORT-GUIDE.md
  */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -37,6 +42,7 @@ const { values: args } = parseArgs({
     section: { type: 'string', default: 'A' },
     publish: { type: 'boolean', default: false },
     'dry-run': { type: 'boolean', default: false },
+    'allow-repeaters': { type: 'boolean', default: false },
   },
 });
 
@@ -105,6 +111,7 @@ async function main() {
           streams.map(async (stream) => ({ stream, groups: await loadGroupRules(tx, stream.id, grade) })),
         );
         const corrections: string[] = [];
+        const enrolledElsewhere: string[] = [];
 
         let markCount = 0;
         for (const s of data.students) {
@@ -137,6 +144,15 @@ async function main() {
             );
           }
           const existing = byRegNo ?? byAdmission;
+          if (existing) {
+            const earlier = await tx.enrollment.findFirst({
+              where: { studentId: existing.id, grade, academicYearId: { not: year.id } },
+              include: { academicYear: true },
+            });
+            if (earlier) {
+              enrolledElsewhere.push(`Student ${s.legacyId} ${fullName(existing)}: Grade ${grade} in ${earlier.academicYear.name}`);
+            }
+          }
           const student = existing
             ? await tx.student.update({ where: { id: existing.id }, data: studentData })
             : await tx.student.create({ data: { admissionNo: s.admissionNo, ...studentData } });
@@ -185,7 +201,19 @@ async function main() {
             }
           }
         }
+        if (enrolledElsewhere.length && !args['allow-repeaters']) {
+          throw new Error(
+            `${enrolledElsewhere.length} student(s) in these files are already enrolled in Grade ${grade} in another year, ` +
+              `e.g.\n${enrolledElsewhere.slice(0, 10).map((e) => `    ${e}`).join('\n')}\n` +
+              `  Are these the right files for ${year.name}? Nothing was saved. If these students really repeated ` +
+              'the grade, run the import again with --allow-repeaters.',
+          );
+        }
         console.log(`Imported ${data.students.length} students, ${markCount} marks into "${exam.name}" (${year.name}, Grade ${grade})`);
+        if (enrolledElsewhere.length) {
+          console.log(`Repeating Grade ${grade} (enrolled in another year too): ${enrolledElsewhere.length}`);
+          enrolledElsewhere.forEach((e) => console.log(`  - ${e}`));
+        }
         if (corrections.length) {
           console.log(`Stream corrected for ${corrections.length} student(s):`);
           corrections.forEach((c) => console.log(`  - ${c}`));

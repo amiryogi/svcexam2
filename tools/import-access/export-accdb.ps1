@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Exports the tables of the old Access exam database to UTF-8 CSV files (read-only) and zips them
-  into out\svi-import.zip for upload. See "Importing the old Access database" in README.md.
+  into out\svi-import.zip for upload. Step-by-step guide for the whole import: tools\import-access\IMPORT-GUIDE.md
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File tools\import-access\export-accdb.ps1 -Database ".\Final Exam XI (2081).accdb"
