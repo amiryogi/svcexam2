@@ -69,26 +69,48 @@ Quality checks: `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`
 
 ## Importing the old Access database
 
-1. On Windows (with Access or the Access Database Engine installed), export the tables to CSV. The `.accdb` is opened **read-only**.
+Each academic year's results live in their own Access file (e.g. `Final Exam XI (2081).accdb`) with the tables `StudentDetails`, `NEB_Details`, `Subject` and `Scores`. Import one file per year as follows.
+
+**On a Windows PC** (with Access or the Access Database Engine installed):
+
+1. Export the tables. The `.accdb` is opened **read-only**. This writes four CSV files and `svi-import.zip` to `tools/import-access/out/`:
    ```powershell
-   powershell -ExecutionPolicy Bypass -File tools\import-access\export-accdb.ps1 -Database .\StudentsDBforwebsite.accdb
+   powershell -ExecutionPolicy Bypass -File tools\import-access\export-accdb.ps1 -Database ".\Final Exam XI (2081).accdb"
    ```
-2. Import into MySQL. Run it as a dry run first: it imports everything inside a transaction, prints a summary and then rolls back.
+2. Check the data. This needs no database: it prints counts, missing dates and numbers, and every warning.
    ```bash
-   npm run import:access -w @svi/api -- --dir ../../tools/import-access/out \
-     --year 2081 --grade 11 --exam Final --exam-year-bs 2081 --exam-year-ad 2024 --dry-run
-   # then without --dry-run, adding --publish to freeze the grade sheets
+   npm run import:access:check -w @svi/api -- --dir ../../tools/import-access/out --year 2081
    ```
-   The importer fixes problems in the old data:
-   - Surnames stored in `MiddleName` are moved to the last name.
-   - `m/d/yyyy` B.S. dates are normalised.
-   - Every subject combination is checked against the curriculum.
 
-   It is idempotent, so re-running it updates instead of duplicating.
+**On the server** (cPanel):
 
-   **Verified on the real file:** 64 students and 768 marks imported with no warnings. 63 of 64 GPAs are identical to the Access calculation. The exception is student 3 (0/50 in Computer Science theory), who Access wrongly graded "C" and who is now correctly NG with the GPA withheld.
+3. In File Manager, create `svi-import` in the home folder (**not** in `public_html`), empty it if it already exists, then upload and extract `svi-import.zip` into it.
+4. In Terminal, run the dry run. It imports everything inside a transaction, prints a summary, then rolls back:
+   ```bash
+   source /home/<cpuser>/nodevenv/svi-api/24/bin/activate && cd /home/<cpuser>/svi-api
+   node dist/scripts/importAccess.js --dir /home/<cpuser>/svi-import --year 2081 --grade 11 --exam Final --dry-run
+   ```
+   If the summary looks right, run the same command without `--dry-run`.
+   - Locally, against a development database, use `npm run import:access -w @svi/api -- …` with the same options instead.
+   - `--exam-year-bs` / `--exam-year-ad` are optional: by default, grade sheets print the academic year as the year the exam was conducted. Either way, it can be changed later under the exam's **Edit**.
 
-> The CSV files contain student personal data. They are git-ignored; delete them after the import.
+**In the app:**
+
+5. Open the imported exam, set the date of issue, and compare a few grade sheets with the paper ones. Then click **Publish results**.
+6. Delete the CSV files and the zip, on the server (`svi-import`) and on the PC (`tools/import-access/out`). They contain student personal data.
+
+**How records are matched and fixed:**
+
+- **Admission numbers:** new students get `SVI-<year>-<Access StuId>`, e.g. `SVI-2081-0001`, because every yearly file numbers students from 1. Override this with `--admission-prefix`.
+- **Existing students:** they are found by NEB registration number first, then by admission number, and keep their admission number. If an admission number already belongs to a student with a different registration number, the import stops and saves nothing.
+- **Re-running:** the import is idempotent. Re-running it updates the existing records instead of creating duplicates.
+- **Data clean-up:**
+  - Surnames stored in `MiddleName` are moved to the last name.
+  - B.S. dates stored as `m/d/yyyy` text or in Access Date fields are both read.
+  - The A.D. date is recalculated from the B.S. date.
+  - Every subject combination is checked against the curriculum.
+
+**Verified on real files:** the 2083 Grade XI file imported 64 students and 768 marks with no warnings. 63 of 64 GPAs are identical to the Access calculation. The exception is student 3 (0/50 in Computer Science theory), who Access wrongly graded "C" and who is now correctly NG with the GPA withheld.
 
 ## Deployment (Linux VPS with Docker)
 

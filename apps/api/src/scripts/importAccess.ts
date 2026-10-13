@@ -6,13 +6,17 @@
  *
  * --exam-year-bs/--exam-year-ad are optional; without them the grade sheet prints the academic year.
  *
- * Idempotent: students are matched by admission number, enrollments by (student, year),
+ * New students get admission numbers <prefix><Access StuId>, by default SVI-<year>-0001, because
+ * every yearly Access file numbers its students from 1 again.
+ *
+ * Idempotent: students are matched by NEB registration number, then admission number (an admission
+ * number already used by a different student aborts the import); enrollments by (student, year);
  * marks by (exam, enrollment, component). --dry-run rolls everything back at the end.
  */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { academicYearNameSchema, formatGp } from '@svi/shared';
+import { academicYearNameSchema, formatGp, fullName } from '@svi/shared';
 import { prisma } from '../lib/prisma.js';
 import { computeExamResults, publishExam } from '../modules/results/results.service.js';
 import { validateSubjectSelection } from '../modules/subjects/curriculum.logic.js';
@@ -28,7 +32,8 @@ const { values: args } = parseArgs({
     exam: { type: 'string', default: 'Final' },
     'exam-year-bs': { type: 'string' },
     'exam-year-ad': { type: 'string' },
-    'admission-prefix': { type: 'string', default: 'SVI-' },
+    /** Default: SVI-<year>- */
+    'admission-prefix': { type: 'string' },
     section: { type: 'string', default: 'A' },
     publish: { type: 'boolean', default: false },
     'dry-run': { type: 'boolean', default: false },
@@ -55,7 +60,7 @@ async function main() {
       subject: await read('Subject.csv'),
       scores: await read('Scores.csv'),
     },
-    args['admission-prefix'],
+    args['admission-prefix'] ?? `SVI-${args.year}-`,
   );
   console.log(`Read ${data.students.length} students, ${data.subjects.length} subject components`);
 
@@ -113,11 +118,24 @@ async function main() {
             dobAd: s.dobAd ? new Date(s.dobAd) : null,
             nebRegistrationNo: s.nebRegistrationNo,
           };
-          const student = await tx.student.upsert({
-            where: { admissionNo: s.admissionNo },
-            create: { admissionNo: s.admissionNo, ...studentData },
-            update: studentData,
-          });
+          // Each yearly file numbers students from 1 again, so never update a different person
+          // who happens to hold the same admission number.
+          const byRegNo = s.nebRegistrationNo
+            ? await tx.student.findUnique({ where: { nebRegistrationNo: s.nebRegistrationNo } })
+            : null;
+          // A student found by registration number keeps their admission number; otherwise s.admissionNo is used.
+          const byAdmission = byRegNo ? null : await tx.student.findUnique({ where: { admissionNo: s.admissionNo } });
+          if (byAdmission && byAdmission.nebRegistrationNo !== s.nebRegistrationNo) {
+            throw new Error(
+              `Student ${s.legacyId} (${s.firstName} ${s.lastName}, reg. no. ${s.nebRegistrationNo ?? 'none'}) would get admission number ` +
+                `${s.admissionNo}, which already belongs to ${fullName(byAdmission)} (reg. no. ${byAdmission.nebRegistrationNo ?? 'none'}). ` +
+                'Use a different --admission-prefix.',
+            );
+          }
+          const existing = byRegNo ?? byAdmission;
+          const student = existing
+            ? await tx.student.update({ where: { id: existing.id }, data: studentData })
+            : await tx.student.create({ data: { admissionNo: s.admissionNo, ...studentData } });
 
           const subjectIds = [...new Set(s.scores.map((sc) => componentByCode.get(sc.thCode)!.subjectId))];
           const problems = validateSubjectSelection(await loadGroupRules(tx, stream.id, grade), subjectIds);

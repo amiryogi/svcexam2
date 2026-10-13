@@ -1,12 +1,13 @@
 <#
 .SYNOPSIS
-  Exports the tables of the old Access exam database to UTF-8 CSV files (read-only).
+  Exports the tables of the old Access exam database to UTF-8 CSV files (read-only) and zips them
+  into out\svi-import.zip for upload. See "Importing the old Access database" in README.md.
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File tools\import-access\export-accdb.ps1 -Database .\StudentsDBforwebsite.accdb
+  powershell -ExecutionPolicy Bypass -File tools\import-access\export-accdb.ps1 -Database ".\Final Exam XI (2081).accdb"
 
-  Then on any machine with the API configured:
-  npm run import:access -w @svi/api -- --dir tools/import-access/out --year 2081 --grade 11 --exam "Final" --exam-year-bs 2081 --exam-year-ad 2024 --dry-run
+  Then check the CSVs (no database needed):
+  npm run import:access:check -w @svi/api -- --dir ../../tools/import-access/out --year 2081
 #>
 param(
   [Parameter(Mandatory = $true)][string]$Database,
@@ -28,7 +29,8 @@ try {
       $row = [ordered]@{}
       foreach ($f in $rs.Fields) {
         $v = $f.Value
-        if ($v -is [datetime]) { $v = $v.ToString('yyyy-MM-dd') }
+        # Invariant culture: B.S. dates stored in Date fields must keep their digits as typed.
+        if ($v -is [datetime]) { $v = $v.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) }
         elseif ($null -eq $v -or $v -is [System.DBNull]) { $v = '' }
         $row[$f.Name] = $v
       }
@@ -44,3 +46,7 @@ finally {
   $db.Close()
 }
 Write-Host "CSV files written to $OutDir"
+
+$zip = Join-Path $OutDir 'svi-import.zip'
+Compress-Archive -Path (Join-Path $OutDir '*.csv') -DestinationPath $zip -Force
+Write-Host "Upload file: $zip (contains student personal data - delete it after the import)"

@@ -55,8 +55,26 @@ describe('transformAccess', () => {
     ]);
   });
 
-  it('parses m/d/yyyy', () => {
+  it('parses m/d/yyyy text and yyyy-mm-dd from Access Date fields', () => {
     expect(normalizeBs('2/26/2066')).toBe('2066-02-26');
-    expect(normalizeBs('2066-02-26')).toBeNull();
+    expect(normalizeBs('2066-02-26')).toBe('2066-02-26');
+    expect(normalizeBs('2064-8-4')).toBe('2064-08-04');
+    expect(normalizeBs('26/2066')).toBeNull();
+  });
+
+  it('reads B.S. dates exported from a Date field', () => {
+    const r = transformAccess({
+      ...csv,
+      studentDetails: [
+        '"StuId","Fname","MiddleName","LName","DOB(BS)","Gender","DOB(AD)","Stream"',
+        '"1","RAM","","SHARMA","2065-12-26","MALE","2009-04-08","Science"',
+      ].join('\n'),
+    });
+    expect(r.students[0]).toMatchObject({ dobBs: '2065-12-26', dobAd: '2009-04-08' });
+    expect(r.warnings.filter((w) => w.includes('date'))).toEqual([]);
+  });
+
+  it('uses the given admission number prefix', () => {
+    expect(transformAccess(csv, 'SVI-2081-').students[0]!.admissionNo).toBe('SVI-2081-0001');
   });
 });

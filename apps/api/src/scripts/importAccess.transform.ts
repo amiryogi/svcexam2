@@ -57,9 +57,15 @@ const titleCase = (s: string) =>
 
 const numOrNull = (v: string | undefined) => (v === undefined || v === '' ? null : Number(v));
 
-/** Access stored B.S. dates as m/d/yyyy text. */
+/**
+ * Access stored B.S. dates as m/d/yyyy text, or (in later files) in a Date field that the
+ * exporter writes as yyyy-mm-dd.
+ */
 export function normalizeBs(value: string): string | null {
-  const m = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const v = value.trim();
+  const iso = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) return `${iso[1]}-${iso[2]!.padStart(2, '0')}-${iso[3]!.padStart(2, '0')}`;
+  const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!m) return null;
   return `${m[3]}-${m[1]!.padStart(2, '0')}-${m[2]!.padStart(2, '0')}`;
 }

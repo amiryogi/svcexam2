@@ -85,6 +85,7 @@ Tests use Vitest and never touch a database. `apps/api/vitest.config.ts` sets a 
 - TypeScript is strict with `noUncheckedIndexedAccess` and `verbatimModuleSyntax`. Use `import type` for type-only imports. API imports use `.js` extensions (ESM).
 - Prettier: single quotes, semicolons, trailing commas, width 100.
 - Line endings are mixed: some files are CRLF, others LF (`core.autocrlf=true`, no `.gitattributes`). Keep each file's existing endings when editing.
+- Yearly Access imports follow the README runbook (`tools/import-access/export-accdb.ps1` → `import:access:check` → `dist/scripts/importAccess.js` on the server). Every Access file numbers students from 1. So students are matched by NEB registration number, and new ones get `SVI-<year>-<StuId>`. Never match students by `StuId` or admission number alone.
 - **Live in production** with real student data:
   - API on NestNepal cPanel "Setup Node.js App" at `https://api.nevanhandicraft.com.np` (Passenger, `app.cjs`).
   - Web on Vercel, which deploys on a push to `main`. `apps/web/vercel.json` rewrites `/api/*` to the API.
