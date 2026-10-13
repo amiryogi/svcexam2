@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateSubjectSelection, type GroupRule } from './curriculum.logic.js';
+import { onlyFittingStream, validateSubjectSelection, type GroupRule } from './curriculum.logic.js';
 
 // Management, Grade 11: NEP=1 ENG=2 SOC=3 MATH=4 ACC=5 ECO=6 CS=7 HM=8
 const management: GroupRule[] = [
@@ -34,5 +34,29 @@ describe('validateSubjectSelection', () => {
 
   it('explains when no curriculum is configured', () => {
     expect(validateSubjectSelection([], [1])[0]).toMatch(/No curriculum/);
+  });
+});
+
+describe('onlyFittingStream', () => {
+  // Science, Grade 11: NEP=1 ENG=2 MATH=4 PHY=10 CHEM=11 BIO=12 CS=7
+  const science: GroupRule[] = [
+    { name: 'Compulsory', minSelect: 3, maxSelect: 3, subjectIds: [1, 2, 4] },
+    { name: 'Optional I', minSelect: 1, maxSelect: 1, subjectIds: [10] },
+    { name: 'Optional II', minSelect: 1, maxSelect: 1, subjectIds: [11] },
+    { name: 'Optional III', minSelect: 1, maxSelect: 1, subjectIds: [12, 7] },
+  ];
+  const streams = [
+    { stream: 'Science', groups: science },
+    { stream: 'Management', groups: management },
+    { stream: 'Humanities', groups: [] },
+  ];
+
+  it('finds the stream that matches the subjects', () => {
+    expect(onlyFittingStream(streams, [1, 2, 4, 10, 11, 12])).toBe('Science');
+    expect(onlyFittingStream(streams, [1, 2, 3, 5, 6, 7])).toBe('Management');
+  });
+
+  it('returns null when no stream fits', () => {
+    expect(onlyFittingStream(streams, [1, 2, 10, 5])).toBeNull();
   });
 });

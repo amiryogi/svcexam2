@@ -108,7 +108,7 @@ Each academic year's results live in their own Access file (e.g. `Final Exam XI 
   - Surnames stored in `MiddleName` are moved to the last name.
   - B.S. dates stored as `m/d/yyyy` text or in Access Date fields are both read.
   - The A.D. date is recalculated from the B.S. date.
-  - Every subject combination is checked against the curriculum.
+  - Every subject combination is checked against the curriculum. If a student's subjects don't fit their recorded stream but fit exactly one other stream, that stream is used, and the dry run lists each correction (Access files often record the wrong stream).
 
 **Verified on real files:** the 2083 Grade XI file imported 64 students and 768 marks with no warnings. 63 of 64 GPAs are identical to the Access calculation. The exception is student 3 (0/50 in Computer Science theory), who Access wrongly graded "C" and who is now correctly NG with the GPA withheld.
 

@@ -32,3 +32,12 @@ export function validateSubjectSelection(groups: GroupRule[], selected: number[]
   }
   return problems;
 }
+
+/**
+ * The only stream whose curriculum accepts the selection, or null when none or several do.
+ * Used to correct a wrongly recorded stream from the subjects a student is registered for.
+ */
+export function onlyFittingStream<T>(streams: { stream: T; groups: GroupRule[] }[], selected: number[]): T | null {
+  const fits = streams.filter((s) => validateSubjectSelection(s.groups, selected).length === 0);
+  return fits.length === 1 ? fits[0]!.stream : null;
+}

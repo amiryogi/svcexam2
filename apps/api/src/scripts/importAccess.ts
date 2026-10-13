@@ -19,7 +19,7 @@ import { parseArgs } from 'node:util';
 import { academicYearNameSchema, formatGp, fullName } from '@svi/shared';
 import { prisma } from '../lib/prisma.js';
 import { computeExamResults, publishExam } from '../modules/results/results.service.js';
-import { validateSubjectSelection } from '../modules/subjects/curriculum.logic.js';
+import { onlyFittingStream, validateSubjectSelection } from '../modules/subjects/curriculum.logic.js';
 import { defaultGradeScaleId, loadGroupRules } from '../modules/subjects/subjects.service.js';
 import { getExam } from '../modules/exams/exams.service.js';
 import { transformAccess } from './importAccess.transform.js';
@@ -101,11 +101,15 @@ async function main() {
         });
         if (exam.status !== 'MARK_ENTRY') throw new Error(`Exam "${exam.name}" is ${exam.status}; unpublish it before re-importing`);
         examId = exam.id;
+        const curricula = await Promise.all(
+          streams.map(async (stream) => ({ stream, groups: await loadGroupRules(tx, stream.id, grade) })),
+        );
+        const corrections: string[] = [];
 
         let markCount = 0;
         for (const s of data.students) {
-          const stream = streamByName.get(s.stream.toLowerCase());
-          if (!stream) {
+          const accessStream = streamByName.get(s.stream.toLowerCase());
+          if (!accessStream) {
             warnings.push(`Student ${s.legacyId}: unknown stream "${s.stream}", skipped`);
             continue;
           }
@@ -138,7 +142,15 @@ async function main() {
             : await tx.student.create({ data: { admissionNo: s.admissionNo, ...studentData } });
 
           const subjectIds = [...new Set(s.scores.map((sc) => componentByCode.get(sc.thCode)!.subjectId))];
-          const problems = validateSubjectSelection(await loadGroupRules(tx, stream.id, grade), subjectIds);
+          let stream = accessStream;
+          let problems = validateSubjectSelection(curricula.find((c) => c.stream.id === stream.id)!.groups, subjectIds);
+          // Access files often record the wrong stream; the subjects registered with NEB decide.
+          const fitting = problems.length ? onlyFittingStream(curricula, subjectIds) : null;
+          if (fitting) {
+            corrections.push(`Student ${s.legacyId}: stream ${accessStream.name} → ${fitting.name} (matches the subjects)`);
+            stream = fitting;
+            problems = [];
+          }
           problems.forEach((p) => warnings.push(`Student ${s.legacyId}: ${p}`));
 
           const enrollment = await tx.enrollment.upsert({
@@ -174,6 +186,10 @@ async function main() {
           }
         }
         console.log(`Imported ${data.students.length} students, ${markCount} marks into "${exam.name}" (${year.name}, Grade ${grade})`);
+        if (corrections.length) {
+          console.log(`Stream corrected for ${corrections.length} student(s):`);
+          corrections.forEach((c) => console.log(`  - ${c}`));
+        }
 
         // Spot-check results against the old Access grade sheets.
         const results = await computeExamResults(tx, await getExam(tx, exam.id));
