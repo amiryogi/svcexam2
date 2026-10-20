@@ -89,8 +89,12 @@ export function marksSummary(result: ExamResult): MarksSummary {
 const markCell = (c: { status: string; marks: number | null }) =>
   c.status === 'ABSENT' ? 'ABS' : c.status === 'WITHHELD' ? 'W' : gp(c.marks);
 
-/** Pass marks = full mark × pass % (75 × 35% = 26.25). */
-const passMarks = (c: { fullMark: number; passPercent: number }) => gp(Math.round(c.fullMark * c.passPercent) / 100);
+/**
+ * Pass marks = full mark × pass % (75 × 35% = 26.25), rounded *up* to the hundredth with the grading
+ * engine's integer arithmetic (meetsPercent), so a student on the printed pass mark always passes.
+ */
+export const passMarks = (c: { fullMark: number; passPercent: number }) =>
+  gp(Math.ceil((Math.round(c.passPercent * 100) * Math.round(c.fullMark * 100)) / 10000) / 100);
 
 function gradeRows(s: GradeSheetData['result']['subjects'][number], cellPt: number): SafeHtml {
   const n = s.components.length;

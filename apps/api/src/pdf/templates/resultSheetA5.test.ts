@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ExamResult } from '@svi/shared';
-import { marksSummary } from './resultSheetA5.js';
+import { gradeComponent, NEB_RULES } from '@svi/shared';
+import { marksSummary, passMarks } from './resultSheetA5.js';
 
 const comp = (fullMark: number, marks: number | null, status: 'PRESENT' | 'ABSENT' | 'WITHHELD' = 'PRESENT') =>
   ({ componentId: 1, type: 'TH', code: '0011', creditHour: 3, fullMark, passPercent: 35, marks, status, percent: null, gradePoint: null, grade: '', outcome: 'PASS' }) as const;
@@ -33,5 +34,22 @@ describe('marksSummary', () => {
       percent: null,
       result: 'INCOMPLETE',
     });
+  });
+});
+
+describe('passMarks', () => {
+  it('prints full mark × pass %', () => {
+    expect(passMarks({ fullMark: 75, passPercent: 35 })).toBe('26.25');
+    expect(passMarks({ fullMark: 25, passPercent: 35 })).toBe('8.75');
+    expect(passMarks({ fullMark: 100, passPercent: 40 })).toBe('40');
+  });
+  it('rounds up so the printed pass mark always passes in the grading engine', () => {
+    // 75 × 40.55% = 30.4125: nearest hundredth would print 30.41, which the engine fails.
+    const c = { fullMark: 75, passPercent: 40.55 };
+    expect(passMarks(c)).toBe('30.42');
+    const at = (marks: number) =>
+      gradeComponent({ componentId: 1, type: 'TH', code: 'x', creditHour: 3, ...c, marks, status: 'PRESENT' }, NEB_RULES).outcome;
+    expect(at(30.42)).not.toBe('NG');
+    expect(at(30.41)).toBe('NG');
   });
 });
