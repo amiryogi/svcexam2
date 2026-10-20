@@ -48,9 +48,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [qc],
   );
 
+  // Signs out on this device even when the request fails (firewall block, session already gone):
+  // the server session then simply expires.
   const logout = useCallback(async () => {
     try {
       await api('/auth/logout', { method: 'POST' });
+    } catch {
+      // nothing to do: the local sign-out below is what the user asked for
     } finally {
       signedOut();
     }

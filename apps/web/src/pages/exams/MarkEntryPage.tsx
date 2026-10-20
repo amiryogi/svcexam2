@@ -14,7 +14,7 @@ import {
   type MarksSaveResult,
   type MarkStatus,
 } from '@svi/shared';
-import { api } from '../../api/client';
+import { api, errorMessage } from '../../api/client';
 import type { Enrollment, GradeScale } from '../../api/types';
 import { useExams, useStreams } from '../../api/hooks';
 import { Alert, Badge, Button, Card, EmptyState, ErrorBlock, Field, LoadingBlock, PageHeader, Select, Table, Td, Th } from '../../components/ui';
@@ -175,6 +175,8 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
   const [conflicts, setConflicts] = useState<Set<number>>(new Set());
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
   const [navigating, setNavigating] = useState(false);
+  // The last save's error, kept while autosave tries again, so the notice doesn't blink off during retries.
+  const [saveError, setSaveError] = useState<unknown>(null);
   // False once the grid has closed: a save still running then can only report through a toast.
   const mounted = useRef(true);
   useEffect(() => {
@@ -230,6 +232,7 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
       return { result, sent, label: subjectLabel };
     },
     onSuccess: async ({ result: r, sent, label }) => {
+      if (mounted.current) setSaveError(null);
       const conflicted = new Set(r.conflicts.map((c) => c.enrollmentId));
       setConflicts((cur) => mergeConflicts(cur, sent.keys(), conflicted));
 
@@ -274,6 +277,7 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
       void qc.invalidateQueries({ queryKey: ['exam-progress', examId] });
     },
     onError: (e, ids) => {
+      if (mounted.current) setSaveError(e);
       if (!mounted.current) toast.error(`${ids.length} mark(s) in ${subjectLabel} were not saved. Open ${subjectLabel} again and re-enter them.`);
       toastError(e);
     },
@@ -345,8 +349,12 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
   };
 
   if (grid.isPending) return <LoadingBlock />;
-  if (grid.isError) return <ErrorBlock error={grid.error} onRetry={() => grid.refetch()} />;
+  // A failed first load has nothing to show. A failed refresh keeps the loaded grid (and any unsaved
+  // typing) on screen, with a notice instead (see below).
+  if (!grid.data) return <ErrorBlock error={grid.error} onRetry={() => grid.refetch()} />;
   const { component, editable, rows } = grid.data;
+  const refreshFailed = grid.isError && !grid.isFetching;
+  const saveFailed = editable && saveError !== null && dirtyIds.length > 0;
   const entered = rows.filter((r) => {
     const c = cellOf(r.enrollmentId);
     return c.status !== 'PRESENT' || c.marks.trim() !== '';
@@ -439,6 +447,25 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
           {navButtons}
         </div>
       </div>
+      {(refreshFailed || saveFailed) && (
+        <div className="border-b border-slate-200 px-5 py-3">
+          <Alert>
+            <div className="flex flex-wrap items-center gap-3">
+              <TriangleAlert className="size-4 shrink-0" />
+              <span className="flex-1">
+                {saveFailed
+                  ? `${dirtyIds.length} mark(s) are not saved yet: ${errorMessage(saveError)} They stay here and are saved again automatically.`
+                  : `Could not refresh this list: ${errorMessage(grid.error)} The marks shown are from the last successful load.`}
+              </span>
+              {!saveFailed && (
+                <Button size="sm" variant="secondary" onClick={() => grid.refetch()}>
+                  Retry
+                </Button>
+              )}
+            </div>
+          </Alert>
+        </div>
+      )}
       {!editable && <ReadOnlyNotice exam={grid.data.exam} included={component.included} type={component.type} />}
       {rows.length === 0 ? (
         <EmptyClass exam={grid.data.exam} streamId={streamId} section={section} />

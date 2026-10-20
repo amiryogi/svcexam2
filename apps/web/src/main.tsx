@@ -3,7 +3,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router';
 import { Toaster } from 'sonner';
-import { ApiError } from './api/client';
+import { ApiError, isFirewallError } from './api/client';
 import { AuthProvider } from './auth/AuthProvider';
 import { BrandingHead } from './components/BrandingHead';
 import { router } from './router';
@@ -14,7 +14,9 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 15_000,
       refetchOnWindowFocus: false,
-      retry: (count, e) => !(e instanceof ApiError && e.status < 500) && count < 2,
+      // A firewall block (403 that never reached the API) is temporary, so it is retried like a 5xx.
+      retry: (count, e) =>
+        isFirewallError(e) ? count < 3 : !(e instanceof ApiError && e.status < 500) && count < 2,
     },
   },
 });

@@ -61,10 +61,14 @@ interface RequestOptions {
 /**
  * Every API response carries X-Request-Id. A 403 without it came from the hosting firewall (Imunify360
  * bot-protection sometimes blocks requests arriving through Vercel's proxy), so it never reached the API
- * and is safe to send again, whatever the method.
+ * and is safe to send again, whatever the method. A block can last several seconds, so the retries
+ * spread over about 15 s.
  */
-const isFirewallBlock = (res: Response) => res.status === 403 && !res.headers.has('X-Request-Id');
-const FIREWALL_RETRY_DELAYS_MS = [700, 2000];
+export const isFirewallBlock = (res: Response) => res.status === 403 && !res.headers.has('X-Request-Id');
+export const FIREWALL_RETRY_DELAYS_MS = [700, 2000, 4000, 8000];
+
+/** The request was blocked by the hosting firewall (it never reached the API). */
+export const isFirewallError = (e: unknown) => e instanceof ApiError && e.code === 'FIREWALL_BLOCKED';
 
 async function toError(res: Response): Promise<ApiError> {
   let body: Partial<ApiErrorBody> | null = null;

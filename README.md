@@ -181,7 +181,10 @@ The API runs on cPanel hosting with **Setup Node.js App** and **Terminal** (here
 **Printing:** grade sheets and ledgers are printed by the user's browser, so the server never runs Chrome. Shared hosting's process limit (about 100 threads per account on NestNepal, shared by all of the account's Node apps) is too low for headless Chromium, which needs about 50 threads. Direct PDF links to the API therefore fail there with "PDF rendering is not configured".
 
 **Shared-hosting gotchas we hit:**
-- Imunify360 bot-protection can block requests coming through Vercel's proxy with a 403 `Access denied by Imunify360 bot-protection`. Ask the host to disable it for the API subdomain.
+- Imunify360 bot-protection can block requests coming through Vercel's proxy with a 403 `Access denied by Imunify360 bot-protection`. In the app this shows as "The server's firewall blocked this request", often during mark entry, which sends the most requests.
+  - **Why it happens:** the API only ever sees Vercel's data-centre addresses. Those addresses change all the time, so an IP whitelist doesn't help.
+  - **The fix:** ask the host to **disable bot-protection (WebShield anti-bot) for the API subdomain**, or add a domain-level exclusion for it. The app has its own login, rate limiting and CSRF checks, and ordinary ModSecurity rules can stay on.
+  - **Until then:** the web app retries blocked requests for about 15 s and keeps unsaved marks on screen. Those marks save automatically once requests get through.
 - If cPanel Terminal or Setup Node.js App fail with `Resource temporarily unavailable`, the account is at its process limit. `kill -9 -1` in Terminal (a shell built-in, so it still works) ends all of the account's processes, and the Node apps restart on their next request.
 
 ### Web app (Vercel)
