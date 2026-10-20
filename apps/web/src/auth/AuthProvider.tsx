@@ -1,7 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import type { AuthUser, LoginResponse } from '@svi/shared';
+import { toast } from 'sonner';
 import { api, ApiError, setCsrfToken, setUnauthorizedHandler } from '../api/client';
+import { hasPendingLogout, setPendingLogout } from './pendingLogout';
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -21,6 +23,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const r = await api<LoginResponse>('/auth/me');
         setCsrfToken(r.csrfToken);
+        if (hasPendingLogout()) {
+          // An earlier sign-out never reached the server: finish it, and never restore the session.
+          await finishLogout().catch(() => undefined);
+          setCsrfToken(null);
+          return null;
+        }
         return r.user;
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) return null;
@@ -43,14 +51,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (username: string, password: string) => {
       const r = await api<LoginResponse>('/auth/login', { method: 'POST', body: { username, password } });
       setCsrfToken(r.csrfToken);
+      setPendingLogout(false);
       qc.setQueryData(ME_KEY, r.user);
     },
     [qc],
   );
 
+  // Signs out on this device even when the request fails. If it didn't reach the server (firewall
+  // block, network), the server session is still valid: remember that, so the next start finishes the
+  // sign-out instead of signing this user back in.
   const logout = useCallback(async () => {
     try {
-      await api('/auth/logout', { method: 'POST' });
+      await finishLogout();
+    } catch {
+      setPendingLogout(true);
+      toast.warning('Signed out on this computer, but the server could not be reached. The sign-out will be completed the next time this app is opened.');
     } finally {
       signedOut();
     }
@@ -61,6 +76,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [me.data, me.isPending, login, logout],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+/** Ends the server session. A 401 means it has already ended, which counts as done. */
+async function finishLogout(): Promise<void> {
+  try {
+    await api('/auth/logout', { method: 'POST' });
+  } catch (e) {
+    if (!(e instanceof ApiError && e.status === 401)) throw e;
+  }
+  setPendingLogout(false);
 }
 
 export function useAuth() {
