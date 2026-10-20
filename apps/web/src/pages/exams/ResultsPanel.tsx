@@ -148,7 +148,7 @@ export function ResultsPanel({ exam }: { exam: ExamDto }) {
           </div>
         )}
         <p className="w-full text-xs text-slate-500">
-          Printing opens your browser's print window. To keep a file, choose <b>Save as PDF</b>. Under <b>More settings</b>, untick <b>Headers and footers</b> (the browser remembers this).
+          Printing opens your browser's print window. To keep a file, choose <b>Save as PDF</b>. Under <b>More settings</b>, untick <b>Headers and footers</b> and keep <b>Margins: Default</b> and <b>Scale: Default (100%)</b>, so grade sheets fill the A4 page exactly like the official format (the browser remembers this).
         </p>
       </div>
       {q.isPending ? (
