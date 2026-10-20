@@ -94,5 +94,6 @@ Tests use Vitest and never touch a database. `apps/api/vitest.config.ts` sets a 
   Keep migrations additive, with defaults that preserve current behaviour. The API is updated by hand:
   1. `npm run build:deploy`;
   2. upload and extract `deploy/svi-api.zip`;
-  3. `npx prisma migrate deploy` in the cPanel Terminal;
-  4. restart.
+  3. when `prisma/schema.prisma` changed, **Run NPM Install** (or `npx prisma generate` in the cPanel Terminal) so the server's Prisma client matches the schema;
+  4. `npx prisma migrate deploy` in the cPanel Terminal;
+  5. restart.

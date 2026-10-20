@@ -18,6 +18,9 @@ const writeJson = (file, data) => writeFileSync(file, JSON.stringify(data, null,
 // Fresh builds, so no stale files from deleted sources end up on the server.
 rmSync(path.join(api, 'dist'), { recursive: true, force: true });
 rmSync(path.join(shared, 'dist'), { recursive: true, force: true });
+// Regenerate the Prisma client from the current schema first: one generated before a schema change
+// (e.g. pulled from git) fails the API build with "Property '…' does not exist on type …".
+run('npm run db:generate -w @svi/api');
 run('npm run build -w @svi/shared');
 run('npm run build -w @svi/api');
 

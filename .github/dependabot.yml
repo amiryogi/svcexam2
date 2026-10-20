@@ -1,12 +1,21 @@
 version: 2
 updates:
+  # Major versions (React Router 8, ESLint 10, Node 26 …) need a deliberate upgrade and testing on
+  # the live app, so Dependabot proposes only minor and patch updates for packages and images.
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: docker
     directory: /docker
     schedule: { interval: monthly }
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+  # GitHub Actions majors stay on: they only affect CI and keep it off deprecated runtimes.
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: monthly }
