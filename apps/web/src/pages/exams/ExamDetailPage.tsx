@@ -3,7 +3,7 @@ import { CheckCircle2, Lock, NotebookPen, Pencil, RotateCcw, Send, Trash2, Unloc
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
-import { INTERNAL_REQUIRED_EXAM_TYPES, type EffectiveExamComponent, type ExamDto, type ExamProgressItem, type ExamStatus } from '@svi/shared';
+import { INTERNAL_REQUIRED_EXAM_TYPES, RESULT_SHEET_LAYOUT_LABEL, type EffectiveExamComponent, type ExamDto, type ExamProgressItem, type ExamStatus } from '@svi/shared';
 import { api, ApiError } from '../../api/client';
 import { qk, useExam } from '../../api/hooks';
 import { useAuth } from '../../auth/AuthProvider';
@@ -29,7 +29,7 @@ export function ExamDetailPage() {
     <>
       <PageHeader
         title={<span className="flex flex-wrap items-center gap-3">{e.name} <Badge color={EXAM_STATUS_COLOR[e.status]}>{EXAM_STATUS_LABEL[e.status]}</Badge></span>}
-        description={`${gradeLabel(e.grade)} · ${e.academicYear} · ${titleCase(e.type)} · ${e.includeInternal ? 'theory + internal' : 'theory only'} · conducted ${e.effectiveYearBs} B.S. (${e.effectiveYearAd} A.D.)${e.issueDateBs ? ` · issue date ${e.issueDateBs}` : ''}`}
+        description={`${gradeLabel(e.grade)} · ${e.academicYear} · ${titleCase(e.type)} · ${e.includeInternal ? 'theory + internal' : 'theory only'}${e.sheetLayout !== 'OFFICIAL' ? ` · ${RESULT_SHEET_LAYOUT_LABEL[e.sheetLayout]}` : ''} · conducted ${e.effectiveYearBs} B.S. (${e.effectiveYearAd} A.D.)${e.issueDateBs ? ` · issue date ${e.issueDateBs}` : ''}`}
         actions={
           <>
             {e.status !== 'LOCKED' && (

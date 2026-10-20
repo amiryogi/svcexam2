@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { EXAM_STATUSES, EXAM_TYPES, INTERNAL_REQUIRED_EXAM_TYPES, MARK_STATUSES, type ExamType } from '../constants.js';
+import { EXAM_STATUSES, EXAM_TYPES, INTERNAL_REQUIRED_EXAM_TYPES, MARK_STATUSES, RESULT_SHEET_LAYOUTS, type ExamType, type ResultSheetLayout } from '../constants.js';
 import { bsDateSchema, decimal, gradeLevelSchema, idSchema, optionalText, requiredText } from './common.js';
 
 export const examSchema = z.object({
@@ -15,6 +15,8 @@ export const examSchema = z.object({
   gradeScaleId: idSchema.optional(),
   /** Terminal exams only; send-up and final exams always include internal marks (see examIncludesInternal()). */
   includeInternal: z.boolean().optional(),
+  /** Terminal exams only; send-up and final exams always print the official sheet (see examSheetLayout()). */
+  sheetLayout: z.enum(RESULT_SHEET_LAYOUTS).optional(),
   remarks: optionalText(500),
 });
 export type ExamInput = z.input<typeof examSchema>;
@@ -24,7 +26,7 @@ export const examUpdateSchema = examSchema.partial();
 export type ExamUpdateInput = z.input<typeof examUpdateSchema>;
 
 /** Fields that only affect how grade sheets are printed; editable even after publishing. */
-export const EXAM_PRINT_FIELDS = ['examYearBs', 'examYearAd', 'resultDateBs', 'issueDateBs', 'remarks'] as const;
+export const EXAM_PRINT_FIELDS = ['examYearBs', 'examYearAd', 'resultDateBs', 'issueDateBs', 'sheetLayout', 'remarks'] as const;
 
 /**
  * Year printed as "conducted in … B.S. (… A.D.)". Uses the exam's own year when set, otherwise
@@ -40,6 +42,11 @@ export function examYears(examYearBs: string | null, examYearAd: string | null, 
 /** Whether internal (practical) marks count in the exam: always for send-up / final, optional for terminal exams. */
 export function examIncludesInternal(type: ExamType, includeInternal: boolean): boolean {
   return INTERNAL_REQUIRED_EXAM_TYPES.includes(type) || includeInternal;
+}
+
+/** Result sheet layout that applies: terminal exams use their own setting, other exams the official sheet. */
+export function examSheetLayout(type: ExamType, layout: ResultSheetLayout | null | undefined): ResultSheetLayout {
+  return type === 'TERMINAL' ? (layout ?? 'OFFICIAL') : 'OFFICIAL';
 }
 
 export const examListQuery = z.object({

@@ -319,6 +319,13 @@ enum ExamType {
   FINAL
 }
 
+/// How a terminal exam's result sheets print. Send-up and final exams always use OFFICIAL.
+enum ResultSheetLayout {
+  OFFICIAL  // the official A4 grade sheet
+  A5_GRADES // A5, grades only, two per A4 landscape page
+  A5_MARKS  // A5, marks only, two per A4 landscape page
+}
+
 enum ExamStatus {
   DRAFT
   MARK_ENTRY
@@ -341,6 +348,8 @@ model Exam {
   gradeScaleId        Int                        @map("grade_scale_id")
   /// Terminal exams only: false = theory marks only. Send-up and final exams always include internal.
   includeInternal     Boolean                    @default(true) @map("include_internal")
+  /// Terminal exams only (see examSheetLayout()); changeable after publishing like other print details.
+  sheetLayout         ResultSheetLayout          @default(OFFICIAL) @map("sheet_layout")
   remarks             String?                    @db.VarChar(500)
   publishedAt         DateTime?                  @map("published_at")
   createdAt           DateTime                   @default(now()) @map("created_at")

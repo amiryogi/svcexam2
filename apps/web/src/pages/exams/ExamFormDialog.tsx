@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 import type { z } from 'zod';
-import { EXAM_TYPES, examSchema, examYears, INTERNAL_REQUIRED_EXAM_TYPES, type ExamDto, type ExamInput, type ExamType } from '@svi/shared';
+import { EXAM_TYPES, examSchema, examYears, INTERNAL_REQUIRED_EXAM_TYPES, RESULT_SHEET_LAYOUT_LABEL, RESULT_SHEET_LAYOUTS, type ExamDto, type ExamInput, type ExamType } from '@svi/shared';
 import { api } from '../../api/client';
 import { useAcademicYears } from '../../api/hooks';
 import type { Enrollment } from '../../api/types';
@@ -27,7 +27,8 @@ export function ExamFormDialog({ open, onClose, exam }: { open: boolean; onClose
   const derived = examYears(null, null, yearName);
   const selectedGrade = Number(useWatch({ control, name: 'grade' }));
   // Send-up and final exams always count internal marks; terminal exams may be theory only.
-  const internalRequired = INTERNAL_REQUIRED_EXAM_TYPES.includes(useWatch({ control, name: 'type' }) as ExamType);
+  const selectedType = useWatch({ control, name: 'type' }) as ExamType;
+  const internalRequired = INTERNAL_REQUIRED_EXAM_TYPES.includes(selectedType);
 
   // Students per grade in the chosen year, so an exam is never created for an empty class.
   const enrolled = useQuery({
@@ -63,6 +64,7 @@ export function ExamFormDialog({ open, onClose, exam }: { open: boolean; onClose
             resultDateBs: exam.resultDateBs ?? '',
             issueDateBs: exam.issueDateBs ?? '',
             includeInternal: exam.includeInternal,
+            sheetLayout: exam.sheetLayout,
             remarks: exam.remarks ?? '',
           }
         : {
@@ -75,6 +77,7 @@ export function ExamFormDialog({ open, onClose, exam }: { open: boolean; onClose
             resultDateBs: '',
             issueDateBs: '',
             includeInternal: false,
+            sheetLayout: 'OFFICIAL',
             remarks: '',
           },
     );
@@ -160,6 +163,18 @@ export function ExamFormDialog({ open, onClose, exam }: { open: boolean; onClose
               : 'Leave unticked for a theory-only exam: only theory marks are entered and printed on ledgers and grade sheets.'}
           </p>
         </div>
+        {selectedType === 'TERMINAL' && (
+          <Field
+            label="Result sheet"
+            className="sm:col-span-2"
+            error={err.sheetLayout?.message}
+            hint="A5 sheets print two per A4 page (landscape) with only the date of issue and the campus chief's signature, no footnote. Can be changed after publishing."
+          >
+            <Select {...register('sheetLayout')}>
+              {RESULT_SHEET_LAYOUTS.map((l) => <option key={l} value={l}>{RESULT_SHEET_LAYOUT_LABEL[l]}</option>)}
+            </Select>
+          </Field>
+        )}
         <Field label="Conducted in (B.S. year)" error={err.examYearBs?.message} hint={`Leave blank to use the academic year (${derived.bs})`}>
           <Input placeholder={derived.bs} {...register('examYearBs')} />
         </Field>

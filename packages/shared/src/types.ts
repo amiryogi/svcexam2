@@ -3,6 +3,7 @@ import type {
   ExamStatus,
   ExamType,
   MarkStatus,
+  ResultSheetLayout,
   SubjectCategory,
 } from './constants.js';
 import type { ExamResult } from './grading/types.js';
@@ -87,6 +88,8 @@ export interface ExamDto {
   gradeScaleId: number;
   /** Effective value: true for send-up / final exams, the exam's own setting for terminal exams. */
   includeInternal: boolean;
+  /** Effective value: OFFICIAL for send-up / final exams, the exam's own setting for terminal exams. */
+  sheetLayout: ResultSheetLayout;
   remarks: string | null;
   publishedAt: string | null;
 }
@@ -172,6 +175,8 @@ export interface GradeSheetData {
     issueDateBs: string | null;
     /** Terminal exam printed with theory marks only (absent on older snapshots). */
     theoryOnly?: boolean;
+    /** How the sheet prints; always read live from the exam (absent on older snapshots = OFFICIAL). */
+    sheetLayout?: ResultSheetLayout;
   };
   student: StudentRef;
   result: ExamResult;

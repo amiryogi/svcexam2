@@ -1,5 +1,9 @@
 import { formatGp, hasMissingMarks, type GradeSheetData } from '@svi/shared';
 import { html, raw, type SafeHtml } from '../html.js';
+import { resultSheetsA5Html } from './resultSheetA5.js';
+import { fitPt, gp, slashDate, typeLabel } from './sheetHelpers.js';
+
+export { fitPt, slashDate } from './sheetHelpers.js';
 
 /*
  * Layout copies the school's official "Format of grade sheet.pdf" (repo root): A4 portrait, Times,
@@ -91,29 +95,9 @@ export const THEORY_ONLY_GRADESHEET_NOTE = [NOTE_CREDIT_HOUR, NOTE_THEORY].join(
 
 const DOTS = '....................................................';
 
-/** 'YYYY-MM-DD' -> 'M/D/YYYY' as printed on the school's grade sheet. */
-export function slashDate(iso: string | null): string {
-  const m = iso?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return m ? `${Number(m[2])}/${Number(m[3])}/${m[1]}` : '';
-}
-
-/** 2.4 / 4 / 3.6 – grade points without trailing zeros, like the official sheet. */
-const gp = (v: number | null) => (v === null ? '' : String(Number(v.toFixed(2))));
-
-const typeLabel = { TH: 'Th', IN: 'In' } as const;
-
 /** Body row height: the official 8.6 mm, smaller when more rows must fit above the footer. */
 export function rowHeightMm(rows: number): number {
   return rows <= 0 ? ROW_MM : Math.min(ROW_MM, Math.floor((ROWS_AREA_MM / rows) * 100) / 100);
-}
-
-/**
- * Font size that fits `len` characters where `fitLen` characters fit at `basePt` (shrinking in
- * half points, never below `minPt`). Text that still doesn't fit wraps or is clipped by its box.
- */
-export function fitPt(len: number, fitLen: number, basePt: number, minPt: number): number {
-  if (len <= fitLen) return basePt;
-  return Math.max(minPt, Math.floor(((basePt * fitLen) / len) * 2) / 2);
 }
 
 const NOTE_WIDTH_MM = 186; // 17.4 mm to 6.6 mm from the right edge
@@ -231,6 +215,9 @@ export function gradeSheetsHtml(sheets: GradeSheetData[], logo: string | null, g
   const who = sheets.length === 1 && first ? first.student.fullName : `${sheets.length} students`;
   const stamp = generatedAt.toLocaleString('en-GB', { timeZone: 'Asia/Kathmandu', dateStyle: 'medium', timeStyle: 'short' });
   const title = first ? `${first.exam.name} grade sheets – ${who} – generated ${stamp}` : 'Grade sheets';
+  // Terminal exams may print A5 sheets instead (one exam per print, so the first sheet decides).
+  const layout = first?.exam.sheetLayout ?? 'OFFICIAL';
+  if (layout !== 'OFFICIAL') return resultSheetsA5Html(sheets, logo, layout, title);
   return html`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>${css}</style></head>
   <body>${sheets.map((s) => sheet(s, logo))}</body></html>`.value;
 }
