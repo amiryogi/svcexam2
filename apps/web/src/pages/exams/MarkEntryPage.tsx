@@ -296,13 +296,12 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
   }, [savableKey, isPending, saveInBackground, grid.data?.editable, edits]);
 
   // Save valid changes when the grid closes (another subject, filter or page) instead of losing them
-  // to the autosave delay. The ref always holds the latest values. Next/Previous save first and set
-  // `left`, so there is nothing more to send.
-  const left = useRef(false);
+  // to the autosave delay. The ref always holds the latest values. After Next/Previous this also
+  // sends anything typed while their save was running; re-sending a mark already saved changes nothing.
   const flush = useRef<() => void>(() => {});
   useEffect(() => {
     flush.current = () => {
-      if (!left.current && savable.length && grid.data?.editable) saveInBackground(savable);
+      if (savable.length && grid.data?.editable) saveInBackground(savable);
     };
   });
   useEffect(() => () => flush.current(), []);
@@ -372,7 +371,6 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
       if (mounted.current) setNavigating(false);
     }
     if (!mounted.current) return;
-    left.current = true;
     nav.go(id);
   };
 
