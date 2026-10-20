@@ -37,16 +37,20 @@ b { font-weight: bold; }
 .info .gap { margin-left: 3.3mm; }
 .info .close { margin-left: 3.7mm; }
 
-table { position: absolute; left: 12.2mm; top: ${TABLE_TOP_MM}mm; width: 185.7mm; table-layout: fixed; border-collapse: collapse; border: 0.3mm solid #000; }
+/* The table and GPA line flow together, so the GPA always follows the table however tall it renders. */
+.body { position: absolute; left: 12.2mm; top: ${TABLE_TOP_MM}mm; width: 185.7mm; }
+table { width: 100%; table-layout: fixed; border-collapse: collapse; border: 0.3mm solid #000; }
 th { height: ${HEAD_MM}mm; padding: 0 0 1.2mm; font-size: 12pt; font-weight: normal; line-height: 4.9mm; text-align: center; vertical-align: middle; border-left: 0.35mm solid #000; border-bottom: 0.4mm solid #000; }
-td { height: var(--row); padding: 0; font-size: 12pt; font-weight: bold; line-height: 1; vertical-align: top; border-left: 0.35mm solid #000; white-space: nowrap; overflow: hidden; }
+td { height: var(--row); padding: 0; font-size: var(--cell); font-weight: bold; line-height: 1; vertical-align: top; border-left: 0.35mm solid #000; white-space: nowrap; overflow: hidden; }
 th:first-child, td:first-child { border-left: 0; }
 th.subjects { padding: 2.6mm 0 0; }
 td.c { text-align: center; }
 td.code { padding-left: 7.6mm; }
 td.ch { padding-left: 4.45mm; }
 td.gp { padding-left: 8.5mm; }
-td.subj { padding-left: 1.6mm; }
+/* The longest catalogue name fills the column exactly, as on the official sheet: let it touch the line. */
+td.subj { padding-left: 1.6mm; overflow: visible; }
+td.subj.wrap { white-space: normal; overflow: hidden; }
 td.grade { padding-left: 5.5mm; }
 td.fg { padding-left: 8.2mm; }
 td.span { vertical-align: middle; }
@@ -59,16 +63,16 @@ tr.first:not(.last) td.span { padding-top: calc(var(--row) * 0.23); }
 /* One line between subjects (the official's double hairline is not wanted). */
 tbody.subject + tbody.subject tr.first td, tbody.subject + tbody.subject td.span { border-top: 0.3mm solid #000; }
 
-.gpa { font-size: 12pt; font-weight: bold; }
-.gpa-label { right: 59.2mm; }
-.gpa-value { left: 159.8mm; }
+.gpa { position: relative; height: 4.3mm; margin-top: 1.2mm; font-size: 12pt; font-weight: bold; }
+.gpa-label { right: 47.1mm; top: 0; }
+.gpa-value { left: 147.6mm; top: 0; }
 
 .foot { font-size: 14pt; }
 .sign { left: 133.8mm; width: 76mm; text-align: center; font-weight: bold; }
 .rule { position: absolute; left: 16.1mm; top: 264.5mm; width: 187.3mm; border-top: 0.4mm solid #000; }
-.note { left: 17.4mm; right: 6.6mm; top: 267.55mm; font-size: 14pt; line-height: 5.75mm; white-space: pre-wrap; }
-/* Long values step down to 12pt instead of running off the page. */
-.small { font-size: 12pt; }
+.note { left: 17.4mm; right: 6.6mm; top: 267.55mm; white-space: pre-wrap; }
+/* Long values shrink (fitPt) and may wrap inside their space instead of running off the page. */
+.wrap { white-space: normal; }
 
 .watermark { position: absolute; top: 38%; left: 0; right: 0; text-align: center; font-size: 64pt; color: rgba(200,0,0,.12); transform: rotate(-28deg); font-weight: bold; }
 `);
@@ -103,16 +107,43 @@ export function rowHeightMm(rows: number): number {
   return rows <= 0 ? ROW_MM : Math.min(ROW_MM, Math.floor((ROWS_AREA_MM / rows) * 100) / 100);
 }
 
-/** Absolutely positioned text at x/y millimetres (the y is the top of the line box). */
-const at = (x: number, y: number, body: SafeHtml | string, cls = '') =>
-  html`<div class="a ${cls}" style="left:${x}mm;top:${y}mm">${body}</div>`;
+/**
+ * Font size that fits `len` characters where `fitLen` characters fit at `basePt` (shrinking in
+ * half points, never below `minPt`). Text that still doesn't fit wraps or is clipped by its box.
+ */
+export function fitPt(len: number, fitLen: number, basePt: number, minPt: number): number {
+  if (len <= fitLen) return basePt;
+  return Math.max(minPt, Math.floor(((basePt * fitLen) / len) * 2) / 2);
+}
 
-function subjectRows(s: GradeSheetData['result']['subjects'][number]): SafeHtml {
+const NOTE_WIDTH_MM = 186; // 17.4 mm to 6.6 mm from the right edge
+const NOTE_HEIGHT_MM = 29; // from 267.55 mm to the bottom of the sheet
+const PT_MM = 25.4 / 72;
+
+/** Largest note size (14pt as on the official sheet) whose estimated lines fit above the page bottom. */
+export function noteFontPt(note: string): number {
+  for (let pt = 14; pt > 6; pt -= 0.5) {
+    const charsPerLine = Math.floor(NOTE_WIDTH_MM / (pt * PT_MM * 0.43)); // ≈ average Times character width
+    const lines = note.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / charsPerLine)), 0);
+    if (lines * pt * (5.75 / 14) <= NOTE_HEIGHT_MM) return pt;
+  }
+  return 6;
+}
+
+/** Absolutely positioned text at x/y millimetres (the y is the top of the line box). */
+const at = (x: number, y: number, body: SafeHtml | string, cls = '', style = '') =>
+  html`<div class="a ${cls}" style="left:${x}mm;top:${y}mm;${style}">${body}</div>`;
+
+const SUBJECT_MIN_PT = 6.5;
+
+function subjectRows(s: GradeSheetData['result']['subjects'][number], cellPt: number): SafeHtml {
   const n = s.components.length;
+  // "Comp. Soc. Std. & life Skill (Th)" (33 characters) is the longest label that fits at full size.
+  const subjPt = fitPt(s.name.length + 5, 33, cellPt, SUBJECT_MIN_PT);
   return html`<tbody class="subject">${s.components.map(
     (c, i) => html`<tr class="${[i === 0 ? 'first' : '', i === n - 1 ? 'last' : ''].join(' ')}">
       <td class="code">${c.code}</td>
-      <td class="subj">${s.name} (${typeLabel[c.type]})</td>
+      <td class="subj ${subjPt === SUBJECT_MIN_PT ? 'wrap' : ''}" style="font-size:${subjPt}pt">${s.name} (${typeLabel[c.type]})</td>
       <td class="ch">${c.creditHour.toFixed(2)}</td>
       <td class="gp">${c.outcome === 'ABSENT' || c.outcome === 'WITHHELD' ? '' : gp(c.gradePoint)}</td>
       <td class="grade">${c.grade}</td>
@@ -126,10 +157,13 @@ function sheet(d: GradeSheetData, logo: string | null): SafeHtml {
   const gpa = result.gpaWithheld ? '—' : formatGp(result.gpa);
   const rows = result.subjects.reduce((sum, s) => sum + s.components.length, 0);
   const row = rowHeightMm(rows);
-  // The GPA line sits 1.5 mm under the table (official: table bottom 210.9, GPA text 212.4).
-  const gpaTop = Math.round((TABLE_TOP_MM + HEAD_MM + rows * row + 1.5) * 100) / 100;
+  // Text shrinks with shorter rows so a row never grows past its height.
+  const cellPt = Math.min(12, Math.floor(((12 * row) / ROW_MM) * 2) / 2);
+  const examLine = `IN THE ${exam.name.toUpperCase()} EXAMINATION CONDUCTED IN ${exam.examYearBs} B.S. (${exam.examYearAd} A.D.)`;
+  const note = school.gradesheetNote ?? (exam.theoryOnly ? THEORY_ONLY_GRADESHEET_NOTE : DEFAULT_GRADESHEET_NOTE);
+  const notePt = noteFontPt(note);
 
-  return html`<section class="sheet" style="--row:${row}mm">
+  return html`<section class="sheet" style="--row:${row}mm;--cell:${cellPt}pt">
     ${hasMissingMarks(result)
       ? html`<div class="watermark">INCOMPLETE</div>`
       : d.provisional
@@ -142,7 +176,7 @@ function sheet(d: GradeSheetData, logo: string | null): SafeHtml {
 
     <div class="info">
       ${at(12.6, 45.3, 'THE GRADE(S) SECURED BY:')}
-      ${at(89.4, 45.3, html`<b>${student.fullName.toUpperCase()}</b>`, student.fullName.length > 30 ? 'small' : '')}
+      ${at(89.4, 45.3, html`<b>${student.fullName.toUpperCase()}</b>`, 'wrap', `max-width:114mm;font-size:${fitPt(student.fullName.length, 32, 14, 8)}pt`)}
       ${at(12.6, 54.8, 'DATE OF BIRTH:')}
       ${at(58.4, 54.8, html`<b>${slashDate(student.dobBs)}</b>`)}
       ${at(84.9, 54.8, html`<b>B.S.</b>`)}
@@ -153,10 +187,11 @@ function sheet(d: GradeSheetData, logo: string | null): SafeHtml {
       ${at(101.5, 64.9, 'SYMBOL NO.')}
       ${at(136.2, 64.9, html`<b>${student.symbolNo ?? ''}</b>`)}
       ${at(162.7, 64.9, html`<b>GRADE ${exam.gradeRoman}</b>`)}
-      ${at(12.6, 74.4, html`IN THE ${exam.name.toUpperCase()} EXAMINATION CONDUCTED IN<b class="gap">${exam.examYearBs} B.S. (${exam.examYearAd} A.D.)</b>`, exam.name.length > 16 ? 'small' : '')}
+      ${at(12.6, 74.4, html`IN THE ${exam.name.toUpperCase()} EXAMINATION CONDUCTED IN<b class="gap">${exam.examYearBs} B.S. (${exam.examYearAd} A.D.)</b>`, 'wrap', `max-width:191mm;font-size:${fitPt(examLine.length, 70, 14, 8)}pt`)}
       ${at(12.6, 83.9, 'ARE GIVEN BELOW.')}
     </div>
 
+    <div class="body">
     <table>
       <colgroup>
         <col style="width:25.3mm"><col style="width:60.05mm"><col style="width:16.65mm"><col style="width:22mm">
@@ -171,11 +206,9 @@ function sheet(d: GradeSheetData, logo: string | null): SafeHtml {
         <th>FINAL<br>GRADE<br>(FG)</th>
         <th>REMARKS</th>
       </tr></thead>
-      ${result.subjects.map(subjectRows)}
+      ${result.subjects.map((s) => subjectRows(s, cellPt))}
     </table>
-    <div class="gpa">
-      <div class="a gpa-label" style="top:${gpaTop}mm">Grade Point Average (GPA)</div>
-      ${at(159.8, gpaTop, gpa, 'gpa-value')}
+    <div class="gpa"><div class="a gpa-label">Grade Point Average (GPA)</div><div class="a gpa-value">${gpa}</div></div>
     </div>
 
     <div class="foot">
@@ -184,11 +217,11 @@ function sheet(d: GradeSheetData, logo: string | null): SafeHtml {
       ${at(16.3, 255.7, 'DATE OF ISSUE:-')}
       ${exam.issueDateBs ? at(58.7, 255.7, html`<b>${exam.issueDateBs} B.S.</b>`) : ''}
       <div class="a sign" style="top:246.2mm">........................................</div>
-      ${school.principalName ? html`<div class="a sign ${school.principalName.length > 22 ? 'small' : ''}" style="top:252.0mm">${school.principalName.toUpperCase()}</div>` : ''}
+      ${school.principalName ? html`<div class="a sign" style="top:252.0mm;font-size:${fitPt(school.principalName.length, 22, 14, 8)}pt">${school.principalName.toUpperCase()}</div>` : ''}
       <div class="a sign" style="top:257.8mm">${school.principalTitle.toUpperCase()}</div>
     </div>
     <div class="rule"></div>
-    <div class="a note">${school.gradesheetNote ?? (exam.theoryOnly ? THEORY_ONLY_GRADESHEET_NOTE : DEFAULT_GRADESHEET_NOTE)}</div>
+    <div class="a note" style="font-size:${notePt}pt;line-height:${Math.round(((5.75 * notePt) / 14) * 100) / 100}mm">${note}</div>
   </section>`;
 }
 
