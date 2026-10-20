@@ -70,12 +70,14 @@ export function parseMarkText(text: string): Cell {
 }
 
 /**
- * A column copied from Excel: one value per line, first column only. The trailing line break
- * Excel adds is dropped; blank lines in between stay as blank marks so rows stay aligned.
+ * A column copied from Excel: one value per line, first column only. Excel ends every row with a
+ * line break, so only the empty piece after the last one is dropped; blank cells, including ones
+ * at the end of the copied range, stay as blank marks so rows stay aligned.
  */
 export function parsePastedColumn(text: string): Cell[] {
+  if (text === '') return [];
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
-  while (lines.length && lines.at(-1)!.trim() === '') lines.pop();
+  if (lines.length > 1 && lines.at(-1)!.trim() === '') lines.pop();
   return lines.map((line) => parseMarkText(line.split('\t')[0] ?? ''));
 }
 
@@ -83,4 +85,21 @@ export function parsePastedColumn(text: string): Cell[] {
 export function classSections(enrollments: { streamId: number; section: string }[], streamId: number | null): string[] {
   const set = new Set(enrollments.filter((e) => streamId === null || e.streamId === streamId).map((e) => e.section));
   return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+/**
+ * Runs async tasks one at a time, in the order queued; a failed task doesn't block the next.
+ * Mark saves go through one, so a save never races another still in flight.
+ */
+export function serialQueue() {
+  let tail: Promise<unknown> = Promise.resolve();
+  return {
+    run<T>(task: () => Promise<T>): Promise<T> {
+      const result = tail.then(task);
+      tail = result.catch(() => undefined);
+      return result;
+    },
+    /** Resolves once everything queued so far has finished. */
+    idle: (): Promise<void> => tail.then(() => undefined),
+  };
 }

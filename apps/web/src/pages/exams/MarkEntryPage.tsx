@@ -27,6 +27,7 @@ import {
   mergeConflicts,
   parsePastedColumn,
   savableIds,
+  serialQueue,
   STATUS_SHORT,
   validateCell as validate,
   type Cell,
@@ -173,6 +174,15 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
   const [edits, setEdits] = useState<Record<number, Cell>>({});
   const [conflicts, setConflicts] = useState<Set<number>>(new Set());
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
+  const [navigating, setNavigating] = useState(false);
+  // False once the grid has closed: a save still running then can only report through a toast.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const server = useMemo(() => {
     const m = new Map<number, { cell: Cell; version: number | null }>();
@@ -190,10 +200,18 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
   // A conflict whose values now agree (the other person saved the same mark) needs no review.
   const review = new Set(dirtyIds.filter((id) => conflicts.has(id)));
 
+  const subjectLabel = grid.data ? `${grid.data.component.subjectName} (${grid.data.component.type === 'TH' ? 'Theory' : 'Internal'})` : 'this subject';
+
   const save = useMutation({
-    mutationFn: async (ids: number[]) => {
+    mutationFn: async (requested: number[]) => {
+      // A queued save can run after an earlier one already saved some of these rows.
+      const ids = requested.filter((id) => edits[id]);
       // Remember exactly what was sent, so typing that happens while the request is in flight is kept.
       const sent = new Map(ids.map((id) => [id, { ...edits[id]! }]));
+      if (ids.length === 0) return { result: { saved: 0, conflicts: [], rows: [] } as MarksSaveResult, sent, label: subjectLabel };
+      // Versions come from the cache at send time, not from when the save was queued: an earlier
+      // save that just finished has already put its new versions there (see onSuccess).
+      const versions = new Map(qc.getQueryData<MarksGrid>(queryKey)?.rows.map((r) => [r.enrollmentId, r.version]));
       const result = await api<MarksSaveResult>(`/exams/${examId}/marks`, {
         method: 'PUT',
         body: {
@@ -204,14 +222,14 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
               subjectComponentId: componentId,
               marks: e.status === 'PRESENT' && e.marks.trim() !== '' ? Number(e.marks) : null,
               status: e.status,
-              version: server.get(id)?.version ?? undefined,
+              version: versions.get(id) ?? undefined,
             };
           }),
         },
       });
-      return { result, sent };
+      return { result, sent, label: subjectLabel };
     },
-    onSuccess: async ({ result: r, sent }) => {
+    onSuccess: async ({ result: r, sent, label }) => {
       const conflicted = new Set(r.conflicts.map((c) => c.enrollmentId));
       setConflicts((cur) => mergeConflicts(cur, sent.keys(), conflicted));
 
@@ -246,29 +264,45 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
         ),
       );
       if (conflicted.size) {
-        toast.warning(`${conflicted.size} mark(s) were changed by someone else. Review the highlighted rows: keep your value or use theirs.`);
+        toast.warning(
+          mounted.current
+            ? `${conflicted.size} mark(s) were changed by someone else. Review the highlighted rows: keep your value or use theirs.`
+            : `${conflicted.size} mark(s) in ${label} were changed by someone else and were not saved. Open ${label} again to check them.`,
+        );
       }
       void qc.invalidateQueries({ queryKey });
       void qc.invalidateQueries({ queryKey: ['exam-progress', examId] });
     },
-    onError: toastError,
+    onError: (e, ids) => {
+      if (!mounted.current) toast.error(`${ids.length} mark(s) in ${subjectLabel} were not saved. Open ${subjectLabel} again and re-enter them.`);
+      toastError(e);
+    },
   });
+
+  // Saves run one at a time, so a save on leaving can't race an autosave still in flight: it waits,
+  // then sends with the versions that save returned.
+  const { mutateAsync, isPending } = save;
+  const [queue] = useState(serialQueue);
+  const enqueue = useCallback((ids: number[]) => queue.run(() => mutateAsync(ids)), [queue, mutateAsync]);
+  // Failures are already reported by onError.
+  const saveInBackground = useCallback((ids: number[]) => void enqueue(ids).catch(() => undefined), [enqueue]);
 
   // Autosave valid changes shortly after typing stops.
   const savableKey = savable.join(',');
-  const { mutate, isPending } = save;
   useEffect(() => {
     if (!savableKey || isPending || !grid.data?.editable) return;
-    const t = setTimeout(() => mutate(savableKey.split(',').map(Number)), AUTOSAVE_MS);
+    const t = setTimeout(() => saveInBackground(savableKey.split(',').map(Number)), AUTOSAVE_MS);
     return () => clearTimeout(t);
-  }, [savableKey, isPending, mutate, grid.data?.editable, edits]);
+  }, [savableKey, isPending, saveInBackground, grid.data?.editable, edits]);
 
   // Save valid changes when the grid closes (another subject, filter or page) instead of losing them
-  // to the autosave delay. The ref always holds the latest values.
+  // to the autosave delay. The ref always holds the latest values. Next/Previous save first and set
+  // `left`, so there is nothing more to send.
+  const left = useRef(false);
   const flush = useRef<() => void>(() => {});
   useEffect(() => {
     flush.current = () => {
-      if (savable.length && grid.data?.editable) mutate(savable);
+      if (!left.current && savable.length && grid.data?.editable) saveInBackground(savable);
     };
   });
   useEffect(() => () => flush.current(), []);
@@ -319,10 +353,25 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
     return c.status !== 'PRESENT' || c.marks.trim() !== '';
   }).length;
 
-  // Valid changes save on the way out; invalid or conflicted ones would be lost, so ask first.
-  const goTo = (id: number) => {
+  // Saves first and moves on only when that worked, so a clash or error keeps the marks on screen.
+  // Invalid or conflicted rows can't be saved, so ask before leaving them behind.
+  const goTo = async (id: number) => {
     const stuck = dirtyIds.length - savable.length;
     if (stuck && !window.confirm(`${stuck} mark(s) are invalid or need review and will not be saved. Go to the other subject anyway?`)) return;
+    setNavigating(true);
+    try {
+      if (editable && savable.length) {
+        const { result } = await enqueue(savable);
+        if (result.conflicts.length) return; // the rows to review are now highlighted
+      } else {
+        await queue.idle(); // let a save in flight finish first
+      }
+    } catch {
+      return; // onError reported it
+    } finally {
+      if (mounted.current) setNavigating(false);
+    }
+    left.current = true;
     nav.go(id);
   };
 
@@ -357,12 +406,12 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
   const navButtons = (
     <>
       {nav.prev && (
-        <Button size="sm" variant="ghost" title={`Previous subject: ${nav.prev.label}`} onClick={() => goTo(nav.prev!.id)}>
+        <Button size="sm" variant="ghost" title={`Previous subject: ${nav.prev.label}`} disabled={navigating} onClick={() => void goTo(nav.prev!.id)}>
           <ChevronLeft className="size-4" /> {nav.prev.label}
         </Button>
       )}
       {nav.next && (
-        <Button size="sm" variant="secondary" title={`Next subject: ${nav.next.label}`} onClick={() => goTo(nav.next!.id)}>
+        <Button size="sm" variant="secondary" title={`Next subject: ${nav.next.label}`} loading={navigating} onClick={() => void goTo(nav.next!.id)}>
           {nav.next.label} <ChevronRight className="size-4" />
         </Button>
       )}
@@ -387,7 +436,7 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
           ) : (
             <span className="flex items-center gap-1 text-green-700"><CheckCircle2 className="size-4" /> All saved</span>
           ))}
-          {editable && <Button size="sm" disabled={!savable.length} loading={save.isPending} onClick={() => save.mutate(savable)}>Save now</Button>}
+          {editable && <Button size="sm" disabled={!savable.length} loading={save.isPending} onClick={() => saveInBackground(savable)}>Save now</Button>}
           {navButtons}
         </div>
       </div>
