@@ -2,6 +2,7 @@ export * from './constants.js';
 export * from './grading/types.js';
 export * from './grading/neb.js';
 export * from './grading/engine.js';
+export * from './grading/stats.js';
 export * from './schemas/common.js';
 export * from './schemas/auth.js';
 export * from './schemas/setup.js';

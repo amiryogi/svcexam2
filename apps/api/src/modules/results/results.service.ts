@@ -168,7 +168,8 @@ export async function publishExam(examId: number, allowIncomplete: boolean, reas
       }
       const publishedAt = new Date();
       const school = toSchoolInfo(await getSettingsRow(tx));
-      await tx.resultSnapshot.deleteMany({ where: { examId } });
+      // Normally none exist here (unpublishing already archived them); archive any leftovers anyway.
+      await archiveSnapshots(tx, examId, 'Replaced by re-publishing');
       await tx.resultSnapshot.createMany({
         data: rows.map(({ result, ...student }) => {
           const payload: GradeSheetData = {
@@ -206,8 +207,30 @@ export async function unpublishExam(examId: number, reason: string, ctx: Ctx) {
   await prisma.$transaction(async (tx) => {
     const exam = await getExam(tx, examId);
     assertStatus(exam, ['PUBLISHED'], 'unpublish');
-    await tx.resultSnapshot.deleteMany({ where: { examId } });
+    const archived = await archiveSnapshots(tx, examId, reason);
     await tx.exam.update({ where: { id: examId }, data: { status: 'MARK_ENTRY', publishedAt: null } });
-    await recordAudit(tx, ctx, { action: 'UNPUBLISH', entity: 'exam', entityId: examId, after: { reason } });
+    await recordAudit(tx, ctx, { action: 'UNPUBLISH', entity: 'exam', entityId: examId, after: { reason, archived } });
   });
+}
+
+/**
+ * Moves an exam's result snapshots to superseded_result_snapshots, so the version printed on grade
+ * sheets that were already handed out stays on record. Returns how many were moved.
+ */
+async function archiveSnapshots(tx: Prisma.TransactionClient, examId: number, reason: string | null) {
+  const snapshots = await tx.resultSnapshot.findMany({ where: { examId } });
+  if (snapshots.length === 0) return 0;
+  await tx.supersededResultSnapshot.createMany({
+    data: snapshots.map((s) => ({
+      examId: s.examId,
+      enrollmentId: s.enrollmentId,
+      payload: s.payload as Prisma.InputJsonValue,
+      gpa: s.gpa,
+      outcome: s.outcome,
+      publishedAt: s.publishedAt,
+      reason: reason?.slice(0, 500) ?? null,
+    })),
+  });
+  await tx.resultSnapshot.deleteMany({ where: { examId } });
+  return snapshots.length;
 }

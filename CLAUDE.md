@@ -17,6 +17,7 @@ npm run build:deploy                # deploy/svi-api.zip for cPanel hosting (scr
 # single test file / single test
 npm test -w @svi/shared -- src/grading/engine.test.ts
 npm test -w @svi/api -- src/pdf/html.test.ts -t "escapes"
+npm test -w @svi/web                # web tests: pure logic only (e.g. pages/exams/markEntry.logic.ts)
 
 # database (run in apps/api, or with -w @svi/api)
 npm run db:generate -w @svi/api     # after editing prisma/schema.prisma
@@ -27,7 +28,7 @@ npm run db:seed && npm run create-admin
 
 Use the workspace scripts, not bare `npx prisma`. Prisma is pinned to ~6.19, and `npx` can fetch an unrelated version.
 
-Tests use Vitest and never touch a database. `apps/api/vitest.config.ts` sets a dummy `DATABASE_URL`, and `app.test.ts` only exercises middleware through supertest. Logic that needs testing goes in pure functions: the grading engine, `curriculum.logic.ts`, `importAccess.transform.ts`, and the template helpers.
+Tests use Vitest and never touch a database. `apps/api/vitest.config.ts` sets a dummy `DATABASE_URL`, and `app.test.ts` only exercises middleware through supertest. Logic that needs testing goes in pure functions: the grading engine, `curriculum.logic.ts`, `marks/progress.logic.ts`, `importAccess.transform.ts`, the template helpers, and in the web app `markEntry.logic.ts` (autosave and conflict handling).
 
 ## How `@svi/shared` is resolved
 
@@ -62,7 +63,7 @@ Tests use Vitest and never touch a database. `apps/api/vitest.config.ts` sets a 
 
   Mark entry, progress, saving marks, results, ledgers and publishing all filter on its `included`, so change that rule there and nowhere else.
 - **Grading:** `computeExamResults()` (`modules/results/results.service.ts`) builds `SubjectInput[]` from enrollments plus marks and calls the pure engine in `packages/shared/src/grading/engine.ts`. The engine does all arithmetic in integer hundredths, so values on a grade boundary never round down. NG in any component makes the subject NG, and the GPA is withheld on NG when the scale's `withholdGpaOnNg` is set. Grade scales are DB rows seeded from `grading/neb.ts`.
-- **Publishing:** writes one immutable `ResultSnapshot` per enrollment (a JSON `GradeSheetData`). Published and locked exams read results from the snapshots, never live. The letterhead (school settings) and the exam print meta (`examMeta()`) are always re-read live, so print-detail corrections show on reprints. After publishing, only `EXAM_PRINT_FIELDS` may change. Any new field added to `GradeSheetData` must be optional, because old snapshots won't have it.
+- **Publishing:** writes one immutable `ResultSnapshot` per enrollment (a JSON `GradeSheetData`). Published and locked exams read results from the snapshots, never live. The letterhead (school settings) and the exam print meta (`examMeta()`) are always re-read live, so print-detail corrections show on reprints. After publishing, only `EXAM_PRINT_FIELDS` may change. Any new field added to `GradeSheetData` must be optional, because old snapshots won't have it. Unpublishing moves the snapshots to `SupersededResultSnapshot` (with the reason) instead of deleting them, so every version that was handed out stays on record.
 - **Marks:** saving uses optimistic locking through `Mark.version`. A stale version is returned as a conflict, not overwritten.
 
 ## PDFs and reports

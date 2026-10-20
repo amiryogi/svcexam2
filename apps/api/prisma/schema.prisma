@@ -237,22 +237,23 @@ model Student {
 }
 
 model Enrollment {
-  id             Int                 @id @default(autoincrement())
-  studentId      Int                 @map("student_id")
-  academicYearId Int                 @map("academic_year_id")
-  grade          Int                 @db.TinyInt
-  streamId       Int                 @map("stream_id")
-  section        String              @default("A") @db.VarChar(10)
-  rollNo         Int?                @map("roll_no")
-  symbolNo       String?             @map("symbol_no") @db.VarChar(20)
-  createdAt      DateTime            @default(now()) @map("created_at")
-  updatedAt      DateTime            @updatedAt @map("updated_at")
-  student        Student             @relation(fields: [studentId], references: [id], onDelete: Restrict)
-  academicYear   AcademicYear        @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
-  stream         Stream              @relation(fields: [streamId], references: [id], onDelete: Restrict)
-  subjects       EnrollmentSubject[]
-  marks          Mark[]
-  snapshots      ResultSnapshot[]
+  id                  Int                        @id @default(autoincrement())
+  studentId           Int                        @map("student_id")
+  academicYearId      Int                        @map("academic_year_id")
+  grade               Int                        @db.TinyInt
+  streamId            Int                        @map("stream_id")
+  section             String                     @default("A") @db.VarChar(10)
+  rollNo              Int?                       @map("roll_no")
+  symbolNo            String?                    @map("symbol_no") @db.VarChar(20)
+  createdAt           DateTime                   @default(now()) @map("created_at")
+  updatedAt           DateTime                   @updatedAt @map("updated_at")
+  student             Student                    @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  academicYear        AcademicYear               @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  stream              Stream                     @relation(fields: [streamId], references: [id], onDelete: Restrict)
+  subjects            EnrollmentSubject[]
+  marks               Mark[]
+  snapshots           ResultSnapshot[]
+  supersededSnapshots SupersededResultSnapshot[]
 
   @@unique([studentId, academicYearId])
   @@unique([academicYearId, grade, section, rollNo])
@@ -326,29 +327,30 @@ enum ExamStatus {
 }
 
 model Exam {
-  id             Int              @id @default(autoincrement())
-  academicYearId Int              @map("academic_year_id")
-  grade          Int              @db.TinyInt
-  name           String           @db.VarChar(80)
-  type           ExamType
+  id                  Int                        @id @default(autoincrement())
+  academicYearId      Int                        @map("academic_year_id")
+  grade               Int                        @db.TinyInt
+  name                String                     @db.VarChar(80)
+  type                ExamType
   /// "Conducted in" year printed on grade sheets; null = derived from the academic year.
-  examYearBs     String?          @map("exam_year_bs") @db.VarChar(4)
-  examYearAd     String?          @map("exam_year_ad") @db.VarChar(4)
-  resultDateBs   String?          @map("result_date_bs") @db.Char(10)
-  issueDateBs    String?          @map("issue_date_bs") @db.Char(10)
-  status         ExamStatus       @default(DRAFT)
-  gradeScaleId   Int              @map("grade_scale_id")
+  examYearBs          String?                    @map("exam_year_bs") @db.VarChar(4)
+  examYearAd          String?                    @map("exam_year_ad") @db.VarChar(4)
+  resultDateBs        String?                    @map("result_date_bs") @db.Char(10)
+  issueDateBs         String?                    @map("issue_date_bs") @db.Char(10)
+  status              ExamStatus                 @default(DRAFT)
+  gradeScaleId        Int                        @map("grade_scale_id")
   /// Terminal exams only: false = theory marks only. Send-up and final exams always include internal.
-  includeInternal Boolean         @default(true) @map("include_internal")
-  remarks        String?          @db.VarChar(500)
-  publishedAt    DateTime?        @map("published_at")
-  createdAt      DateTime         @default(now()) @map("created_at")
-  updatedAt      DateTime         @updatedAt @map("updated_at")
-  academicYear   AcademicYear     @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
-  gradeScale     GradeScale       @relation(fields: [gradeScaleId], references: [id], onDelete: Restrict)
-  components     ExamComponent[]
-  marks          Mark[]
-  snapshots      ResultSnapshot[]
+  includeInternal     Boolean                    @default(true) @map("include_internal")
+  remarks             String?                    @db.VarChar(500)
+  publishedAt         DateTime?                  @map("published_at")
+  createdAt           DateTime                   @default(now()) @map("created_at")
+  updatedAt           DateTime                   @updatedAt @map("updated_at")
+  academicYear        AcademicYear               @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  gradeScale          GradeScale                 @relation(fields: [gradeScaleId], references: [id], onDelete: Restrict)
+  components          ExamComponent[]
+  marks               Mark[]
+  snapshots           ResultSnapshot[]
+  supersededSnapshots SupersededResultSnapshot[]
 
   @@unique([academicYearId, grade, name])
   @@map("exams")
@@ -410,4 +412,24 @@ model ResultSnapshot {
 
   @@unique([examId, enrollmentId])
   @@map("result_snapshots")
+}
+
+/// A result snapshot replaced by unpublishing (and later re-publishing) its exam. Kept so the
+/// version printed on grade sheets that were already issued stays on record.
+model SupersededResultSnapshot {
+  id           Int        @id @default(autoincrement())
+  examId       Int        @map("exam_id")
+  enrollmentId Int        @map("enrollment_id")
+  payload      Json
+  gpa          Decimal?   @db.Decimal(3, 2)
+  outcome      String     @db.VarChar(12)
+  publishedAt  DateTime   @map("published_at")
+  supersededAt DateTime   @default(now()) @map("superseded_at")
+  reason       String?    @db.VarChar(500)
+  exam         Exam       @relation(fields: [examId], references: [id], onDelete: Cascade)
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@index([examId, enrollmentId])
+  @@index([enrollmentId])
+  @@map("superseded_result_snapshots")
 }
