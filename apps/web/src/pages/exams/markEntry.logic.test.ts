@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cellFromKey, classSections, isDirty, mergeConflicts, parsePastedColumn, savableIds, validateCell } from './markEntry.logic';
+import { cellFromKey, classSections, isDirty, mergeConflicts, parsePastedColumn, savableIds, serialQueue, validateCell } from './markEntry.logic';
 
 describe('validateCell', () => {
   it('accepts empty, absent and in-range marks', () => {
@@ -68,6 +68,17 @@ describe('parsePastedColumn', () => {
       { marks: '', status: 'WITHHELD' },
     ]);
   });
+  it('keeps blank cells at the end of the copied range', () => {
+    // 45 followed by one blank cell, as Excel copies it.
+    expect(parsePastedColumn('45\r\n\r\n')).toEqual([
+      { marks: '45', status: 'PRESENT' },
+      { marks: '', status: 'PRESENT' },
+    ]);
+    expect(parsePastedColumn('45')).toEqual([{ marks: '45', status: 'PRESENT' }]);
+    // A single blank cell copied from Excel clears one mark; an empty clipboard pastes nothing.
+    expect(parsePastedColumn('\r\n')).toEqual([{ marks: '', status: 'PRESENT' }]);
+    expect(parsePastedColumn('')).toEqual([]);
+  });
   it('keeps unreadable values so validation can flag them', () => {
     expect(parsePastedColumn('4o')).toEqual([{ marks: '4o', status: 'PRESENT' }]);
   });
@@ -84,5 +95,39 @@ describe('classSections', () => {
   it('lists distinct sections, optionally for one stream', () => {
     expect(classSections(rows, null)).toEqual(['A', 'B', 'C']);
     expect(classSections(rows, 2)).toEqual(['C']);
+  });
+});
+
+describe('serialQueue', () => {
+  it('starts each task only after the previous one finished, even when it failed', async () => {
+    const q = serialQueue();
+    const log: string[] = [];
+    let release!: () => void;
+    const first = q.run(
+      () =>
+        new Promise<string>((resolve) => {
+          log.push('first start');
+          release = () => {
+            log.push('first end');
+            resolve('a');
+          };
+        }),
+    );
+    const failing = q.run(async () => {
+      log.push('second');
+      throw new Error('boom');
+    });
+    const third = q.run(async () => {
+      log.push('third');
+      return 'c';
+    });
+    await Promise.resolve();
+    expect(log).toEqual(['first start']);
+    release();
+    await expect(first).resolves.toBe('a');
+    await expect(failing).rejects.toThrow('boom');
+    await expect(third).resolves.toBe('c');
+    expect(log).toEqual(['first start', 'first end', 'second', 'third']);
+    await expect(q.idle()).resolves.toBeUndefined();
   });
 });

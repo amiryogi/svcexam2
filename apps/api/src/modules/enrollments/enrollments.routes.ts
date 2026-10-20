@@ -163,11 +163,13 @@ enrollmentsRouter.delete('/:id', async (req, res) => {
   await prisma.$transaction(async (tx) => {
     const before = await findEnrollment(tx, id);
     if (!before) throw notFound('Enrollment');
-    const [marks, snapshots] = await Promise.all([
+    // Results replaced by unpublishing count too: deleting would cascade to that record.
+    const [marks, snapshots, superseded] = await Promise.all([
       tx.mark.count({ where: { enrollmentId: id } }),
       tx.resultSnapshot.count({ where: { enrollmentId: id } }),
+      tx.supersededResultSnapshot.count({ where: { enrollmentId: id } }),
     ]);
-    if (marks || snapshots) throw conflict('This enrollment has marks or published results and cannot be deleted');
+    if (marks || snapshots || superseded) throw conflict('This enrollment has marks or published results and cannot be deleted');
     await tx.enrollment.delete({ where: { id } });
     await recordAudit(tx, ctxOf(req), { action: 'DELETE', entity: 'enrollment', entityId: id, before: toDto(before) });
   });

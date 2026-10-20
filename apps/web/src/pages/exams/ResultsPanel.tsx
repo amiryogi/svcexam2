@@ -74,6 +74,16 @@ export function ResultsPanel({ exam }: { exam: ExamDto }) {
         [r.fullName, r.rollNo, r.symbolNo, r.nebRegistrationNo, r.admissionNo].some((v) => v !== null && String(v).toLowerCase().includes(needle)),
     );
     if (sort === 'name') return [...list].sort((a, b) => a.fullName.localeCompare(b.fullName));
+    if (sort === 'roll') {
+      // By each row's own section and roll no.: published rows show the roll no. frozen in their
+      // snapshot, while the API orders them by the current enrollment.
+      return [...list].sort(
+        (a, b) =>
+          a.section.localeCompare(b.section, undefined, { numeric: true }) ||
+          (a.rollNo ?? Infinity) - (b.rollNo ?? Infinity) ||
+          a.fullName.localeCompare(b.fullName),
+      );
+    }
     if (sort === 'gpa') {
       // Ranked students first by position, then everyone else by GPA (missing last).
       return [...list].sort((a, b) => {

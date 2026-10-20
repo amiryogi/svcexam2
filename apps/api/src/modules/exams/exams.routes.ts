@@ -112,6 +112,10 @@ examsRouter.delete('/:id', async (req, res) => {
     const exam = await getExam(tx, id);
     assertStatus(exam, ['DRAFT'], 'delete the exam');
     if (await tx.mark.count({ where: { examId: id } })) throw conflict('Marks exist for this exam; it cannot be deleted');
+    // Deleting the exam would cascade to the record of results it once published.
+    if (await tx.supersededResultSnapshot.count({ where: { examId: id } })) {
+      throw conflict('This exam has published results on record; it cannot be deleted');
+    }
     await tx.exam.delete({ where: { id } });
     await recordAudit(tx, ctxOf(req), { action: 'DELETE', entity: 'exam', entityId: id, before: toExamDto(exam) });
   });

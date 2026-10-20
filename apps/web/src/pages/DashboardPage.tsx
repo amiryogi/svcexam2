@@ -153,7 +153,12 @@ function MarksToDo({ exams }: { exams: DashboardSummary['exams'] }) {
                 <Link to={`/exams/${e.id}`} className="font-medium text-slate-800 hover:text-brand-700">
                   {e.name} · {gradeLabel(e.grade)}
                 </Link>
-                {total === 0 ? (
+                {total === 0 && e.progressPercent === 0 ? (
+                  // Nothing is expected: no students are enrolled in this exam's class (publishing would fail).
+                  <Link to={`/exams/${e.id}`} className="text-sm font-medium text-amber-700">
+                    No students enrolled for this class yet
+                  </Link>
+                ) : total === 0 ? (
                   <Link to={`/exams/${e.id}`} className="flex items-center gap-1 text-sm font-medium text-green-700">
                     <CheckCircle2 className="size-4" /> All marks are in – ready to publish
                   </Link>
