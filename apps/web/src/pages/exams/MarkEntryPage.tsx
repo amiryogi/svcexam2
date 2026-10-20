@@ -19,22 +19,12 @@ import { useExams, useStreams } from '../../api/hooks';
 import { Alert, Badge, Button, Card, EmptyState, ErrorBlock, Field, Input, LoadingBlock, PageHeader, Select, Table, Td, Th } from '../../components/ui';
 import { gradeLabel } from '../../lib/format';
 import { toastError } from '../../lib/forms';
-
-interface Cell {
-  marks: string;
-  status: MarkStatus;
-}
+import { isDirty, mergeConflicts, savableIds, validateCell as validate, type Cell } from './markEntry.logic';
 
 const AUTOSAVE_MS = 2000;
 
-function validate(cell: Cell, fullMark: number): string | null {
-  if (cell.status !== 'PRESENT' || cell.marks.trim() === '') return null;
-  const n = Number(cell.marks);
-  if (!Number.isFinite(n)) return 'Not a number';
-  if (n < 0 || n > fullMark) return `0–${fullMark}`;
-  if (!/^\d+(\.\d{1,2})?$/.test(cell.marks.trim())) return 'Max 2 decimals';
-  return null;
-}
+const STATUS_LABEL: Record<MarkStatus, string> = { PRESENT: 'Present', ABSENT: 'Absent', WITHHELD: 'Withheld' };
+const cellText = (c: Cell | undefined) => (!c ? 'blank' : c.status !== 'PRESENT' ? STATUS_LABEL[c.status] : c.marks || 'blank');
 
 export function MarkEntryPage() {
   const [params, setParams] = useSearchParams();
@@ -139,13 +129,12 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
   const fullMark = grid.data?.component.fullMark ?? 0;
   const dirtyIds = Object.keys(edits)
     .map(Number)
-    .filter((id) => {
-      const s = server.get(id)?.cell;
-      const e = edits[id]!;
-      return !s || s.marks !== e.marks.trim() || s.status !== e.status;
-    });
+    .filter((id) => isDirty(edits[id]!, server.get(id)?.cell));
   const invalidIds = dirtyIds.filter((id) => validate(edits[id]!, fullMark));
-  const savable = dirtyIds.filter((id) => !invalidIds.includes(id));
+  // Rows changed by someone else are held back until the user decides (see markEntry.logic.ts).
+  const savable = savableIds(dirtyIds, invalidIds, conflicts);
+  // A conflict whose values now agree (the other person saved the same mark) needs no review.
+  const review = new Set(dirtyIds.filter((id) => conflicts.has(id)));
 
   const save = useMutation({
     mutationFn: async (ids: number[]) => {
@@ -170,7 +159,7 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
     },
     onSuccess: async ({ result: r, sent }) => {
       const conflicted = new Set(r.conflicts.map((c) => c.enrollmentId));
-      setConflicts(conflicted);
+      setConflicts((cur) => mergeConflicts(cur, sent.keys(), conflicted));
 
       // Put the saved values (and their new versions) into the grid straight away, so the cell never
       // flashes back to the old mark while the grid reloads.
@@ -202,7 +191,9 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
           }),
         ),
       );
-      if (conflicted.size) toast.warning(`${conflicted.size} mark(s) were changed by someone else. Review the highlighted rows and save again.`);
+      if (conflicted.size) {
+        toast.warning(`${conflicted.size} mark(s) were changed by someone else. Review the highlighted rows: keep your value or use theirs.`);
+      }
       void qc.invalidateQueries({ queryKey });
       void qc.invalidateQueries({ queryKey: ['exam-progress', examId] });
     },
@@ -228,7 +219,25 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
   }, [hasUnsaved]);
 
   const cellOf = useCallback((id: number): Cell => edits[id] ?? server.get(id)?.cell ?? { marks: '', status: 'PRESENT' }, [edits, server]);
-  const setCell = (id: number, patch: Partial<Cell>) => setEdits((cur) => ({ ...cur, [id]: { ...cellOf(id), ...patch } }));
+  const setCell = (id: number, patch: Partial<Cell>) => {
+    setEdits((cur) => ({ ...cur, [id]: { ...cellOf(id), ...patch } }));
+    // Typing a new value in a conflicted row is the user's decision; it saves from now on.
+    if (conflicts.has(id)) resolveConflict(id, 'mine');
+  };
+  const resolveConflict = (id: number, keep: 'mine' | 'theirs') => {
+    setConflicts((cur) => {
+      const next = new Set(cur);
+      next.delete(id);
+      return next;
+    });
+    if (keep === 'theirs') {
+      setEdits((cur) => {
+        const next = { ...cur };
+        delete next[id];
+        return next;
+      });
+    }
+  };
 
   const move = (index: number, delta: number) => {
     const el = inputs.current[index + delta];
@@ -256,6 +265,7 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
         <div className="ml-auto flex items-center gap-3 text-sm">
           {!editable && <Badge color="amber">Read only</Badge>}
           {invalidIds.length > 0 && <span className="flex items-center gap-1 text-red-600"><TriangleAlert className="size-4" /> {invalidIds.length} invalid</span>}
+          {review.size > 0 && <span className="flex items-center gap-1 text-amber-700"><TriangleAlert className="size-4" /> {review.size} to review</span>}
           {editable && (save.isPending ? (
             <span className="flex items-center gap-1 text-slate-500"><CloudUpload className="size-4 animate-pulse" /> Saving…</span>
           ) : dirtyIds.length ? (
@@ -296,7 +306,7 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
                 );
               }
               return (
-                <tr key={r.enrollmentId} className={clsx(conflicts.has(r.enrollmentId) && 'bg-amber-50', dirty && !conflicts.has(r.enrollmentId) && 'bg-blue-50/40')}>
+                <tr key={r.enrollmentId} className={clsx(review.has(r.enrollmentId) && 'bg-amber-50', dirty && !review.has(r.enrollmentId) && 'bg-blue-50/40')}>
                   <Td>{r.rollNo ?? '—'}</Td>
                   <Td className="font-medium">{r.fullName}<span className="ml-2 text-xs font-normal text-slate-400">{r.stream} {r.section}</span></Td>
                   <Td className="font-mono text-xs">{r.symbolNo ?? '—'}</Td>
@@ -324,6 +334,15 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
                       )}
                     />
                     {error && <span className="ml-2 text-xs text-red-600">{error}</span>}
+                    {review.has(r.enrollmentId) && (
+                      <div className="mt-1 text-xs text-amber-800">
+                        Someone else saved <b>{cellText(server.get(r.enrollmentId)?.cell)}</b>; yours is <b>{cellText(edits[r.enrollmentId])}</b>.
+                        <span className="mt-1 flex gap-2">
+                          <Button size="sm" variant="secondary" onClick={() => resolveConflict(r.enrollmentId, 'mine')}>Keep mine</Button>
+                          <Button size="sm" variant="ghost" onClick={() => resolveConflict(r.enrollmentId, 'theirs')}>Use theirs</Button>
+                        </span>
+                      </div>
+                    )}
                   </Td>
                   <Td>
                     <select
