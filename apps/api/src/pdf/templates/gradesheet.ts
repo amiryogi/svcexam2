@@ -2,53 +2,77 @@ import { formatGp, hasMissingMarks, type GradeSheetData } from '@svi/shared';
 import { html, raw, type SafeHtml } from '../html.js';
 
 /*
- * Layout follows the school's official "Format of grade sheet.pdf" (Times, A4 portrait):
- * letterhead with round logo, label/value lines, paired TH/IN rows per subject,
- * GPA line, signatures and the credit-hour note.
+ * Layout copies the school's official "Format of grade sheet.pdf" (repo root): A4 portrait, Times,
+ * every block placed in millimetres from the page's top-left corner as measured on that PDF, so the
+ * printout lands where the official one does. One deliberate difference: a single line between
+ * subjects instead of the official double hairline.
+ *
+ * The page has no margins (@page margin 0): positions are absolute, and the browser has no room left
+ * for its URL/date headers. The footer is pinned to the bottom like the official; the table's rows
+ * shrink when a student has more rows than the official 12, so the GPA line never reaches the footer.
  */
+const ROW_MM = 8.6; // official body row height (a Th + In subject is 17.2 mm)
+const ROWS_AREA_MM = 12 * ROW_MM; // official space for body rows: 12 rows of 8.6 mm, table bottom ≈ 211 mm
+const TABLE_TOP_MM = 90.6;
+const HEAD_MM = 17.3;
+
 const css = raw(`
-@page { size: A4; margin: 14mm 15mm 12mm; }
+@page { size: A4; margin: 0; }
 * { box-sizing: border-box; }
-body { font-family: "Times New Roman", "Liberation Serif", "Noto Serif", Times, serif; color: #000; font-size: 11.5pt; margin: 0; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-.sheet { position: relative; }
-.sheet + .sheet { break-before: page; }
+html, body { margin: 0; padding: 0; }
+body { font-family: "Times New Roman", "Liberation Serif", Tinos, "Noto Serif", Times, serif; color: #000; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+.sheet { position: relative; width: 210mm; height: 296.8mm; overflow: hidden; break-after: page; }
+.sheet:last-child { break-after: auto; }
+.a { position: absolute; white-space: nowrap; line-height: 1; }
+b { font-weight: bold; }
 
-.head { display: grid; grid-template-columns: 96px 1fr 96px; align-items: start; text-align: center; break-inside: avoid; }
 /* Fixed, clipped box: Chromium otherwise bleeds a sliver of large downscaled PNGs onto the previous page. */
-.head .logo { width: 88px; height: 88px; margin-left: 4px; overflow: hidden; contain: paint; }
-.head .logo img { display: block; width: 100%; height: 100%; object-fit: contain; }
-.head h1 { font-size: 22pt; font-weight: bold; margin: 0; letter-spacing: .2px; }
-.head .addr { font-size: 11pt; font-weight: bold; margin-top: 4px; }
-.head .title { font-size: 12.5pt; font-weight: bold; margin-top: 18px; }
+.logo { left: 15mm; top: 8.5mm; width: 25.4mm; height: 25.4mm; overflow: hidden; contain: paint; }
+.logo img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.school { left: 12.8mm; right: 0; top: 10.5mm; text-align: center; font-size: 24pt; font-weight: bold; }
+.addr { left: 14mm; right: 0; top: 21.35mm; text-align: center; font-size: 14pt; font-weight: bold; }
+.title { left: 8mm; right: 0; top: 31.85mm; text-align: center; font-size: 16pt; font-weight: bold; }
 
-.info { margin-top: 18px; line-height: 2.05; }
-.info b { font-weight: bold; }
-.gap { display: inline-block; width: 26px; }
-.gap-s { display: inline-block; width: 12px; }
+.info { font-size: 14pt; }
+.info .gap { margin-left: 3.3mm; }
+.info .close { margin-left: 3.7mm; }
 
-table { width: 100%; border-collapse: collapse; margin-top: 2px; border: 1px solid #000; }
-th { font-weight: normal; font-size: 10pt; line-height: 1.15; padding: 4px 3px; border-left: 1px solid #000; border-bottom: 2px solid #000; text-align: center; vertical-align: middle; }
-th:first-child { border-left: 0; }
-td { font-weight: bold; font-size: 10.5pt; padding: 3px 6px; border-left: 1px solid #000; vertical-align: middle; }
-td:first-child { border-left: 0; }
+/* The table and GPA line flow together, so the GPA always follows the table however tall it renders. */
+.body { position: absolute; left: 12.2mm; top: ${TABLE_TOP_MM}mm; width: 185.7mm; }
+table { width: 100%; table-layout: fixed; border-collapse: collapse; border: 0.3mm solid #000; }
+th { height: ${HEAD_MM}mm; padding: 0 0 1.2mm; font-size: 12pt; font-weight: normal; line-height: 4.9mm; text-align: center; vertical-align: middle; border-left: 0.35mm solid #000; border-bottom: 0.4mm solid #000; }
+td { height: var(--row); padding: 0; font-size: var(--cell); font-weight: bold; line-height: 1; vertical-align: top; border-left: 0.35mm solid #000; white-space: nowrap; overflow: hidden; }
+th:first-child, td:first-child { border-left: 0; }
+th.subjects { padding: 2.6mm 0 0; }
 td.c { text-align: center; }
-td.l { text-align: left; }
-tr.first td { padding-top: 8px; }
-tr.last td { padding-bottom: 8px; }
-tbody.subject + tbody.subject tr.first td { border-top: 3px double #000; }
-td.span { border-top: 3px double #000; }
-tbody.subject:first-of-type td.span { border-top: 0; }
+td.code { padding-left: 7.6mm; }
+td.ch { padding-left: 4.45mm; }
+td.gp { padding-left: 8.5mm; }
+/* The longest catalogue name fills the column exactly, as on the official sheet: let it touch the line. */
+td.subj { padding-left: 1.6mm; overflow: visible; }
+td.subj.wrap { white-space: normal; overflow: hidden; }
+td.grade { padding-left: 5.5mm; }
+td.fg { padding-left: 8.2mm; }
+td.span { vertical-align: middle; }
+/* Text sits where the official puts it: a Th row low in its half, the In row just under it. */
+tr.first td { padding-top: calc(var(--row) * 0.43 - 0.25mm); }
+tr.last td { padding-top: calc(var(--row) * 0.2 - 0.05mm); }
+tr.first.last td { padding-top: 0; vertical-align: middle; }
+/* Final grade sits a little low in a Th + In pair, as on the official; centred in a single row. */
+tr.first:not(.last) td.span { padding-top: calc(var(--row) * 0.23); }
+/* One line between subjects (the official's double hairline is not wanted). */
+tbody.subject + tbody.subject tr.first td, tbody.subject + tbody.subject td.span { border-top: 0.3mm solid #000; }
 
-.gpa { margin-top: 6px; text-align: right; padding-right: 21%; font-weight: bold; font-size: 10.5pt; }
-.gpa span { display: inline-block; margin-left: 22px; }
+.gpa { position: relative; height: 4.3mm; margin-top: 1.2mm; font-size: 12pt; font-weight: bold; }
+.gpa-label { right: 47.1mm; top: 0; }
+.gpa-value { left: 147.6mm; top: 0; }
 
-.foot { margin-top: 64px; display: flex; justify-content: space-between; align-items: flex-end; }
-.foot .left { line-height: 1; }
-.foot .left p { margin: 0 0 20px; }
-.foot .left p:last-child { margin-bottom: 0; }
-.foot .right { text-align: center; font-weight: bold; font-size: 11pt; line-height: 1.25; padding-right: 6px; }
-.rule { border-top: 1.5px solid #000; margin: 12px -15mm 0 0; }
-.note { margin-top: 8px; font-size: 10.5pt; line-height: 1.3; white-space: pre-wrap; padding-left: 8px; }
+.foot { font-size: 14pt; }
+.sign { left: 133.8mm; width: 76mm; text-align: center; font-weight: bold; }
+.rule { position: absolute; left: 16.1mm; top: 264.5mm; width: 187.3mm; border-top: 0.4mm solid #000; }
+.note { left: 17.4mm; right: 6.6mm; top: 267.55mm; white-space: pre-wrap; }
+/* Long values shrink (fitPt) and may wrap inside their space instead of running off the page. */
+.wrap { white-space: normal; }
 
 .watermark { position: absolute; top: 38%; left: 0; right: 0; text-align: center; font-size: 64pt; color: rgba(200,0,0,.12); transform: rotate(-28deg); font-weight: bold; }
 `);
@@ -56,7 +80,8 @@ tbody.subject:first-of-type td.span { border-top: 0; }
 const NOTE_CREDIT_HOUR = 'Note : 1 Credit Hour is equal to 32 working hours.';
 const NOTE_INTERNAL = [
   'IN (Internal) : Project work, Practical, Presentation, Community Work, Presentation,',
-  '            Terminal Examinations',
+  // Spaces line "Terminal Examinations" up under "Project", as on the official sheet.
+  `${' '.repeat(22)}Terminal Examinations`,
 ];
 const NOTE_THEORY = 'TH (Theory): Written External Examination';
 
@@ -77,16 +102,52 @@ const gp = (v: number | null) => (v === null ? '' : String(Number(v.toFixed(2)))
 
 const typeLabel = { TH: 'Th', IN: 'In' } as const;
 
-function subjectRows(s: GradeSheetData['result']['subjects'][number]): SafeHtml {
+/** Body row height: the official 8.6 mm, smaller when more rows must fit above the footer. */
+export function rowHeightMm(rows: number): number {
+  return rows <= 0 ? ROW_MM : Math.min(ROW_MM, Math.floor((ROWS_AREA_MM / rows) * 100) / 100);
+}
+
+/**
+ * Font size that fits `len` characters where `fitLen` characters fit at `basePt` (shrinking in
+ * half points, never below `minPt`). Text that still doesn't fit wraps or is clipped by its box.
+ */
+export function fitPt(len: number, fitLen: number, basePt: number, minPt: number): number {
+  if (len <= fitLen) return basePt;
+  return Math.max(minPt, Math.floor(((basePt * fitLen) / len) * 2) / 2);
+}
+
+const NOTE_WIDTH_MM = 186; // 17.4 mm to 6.6 mm from the right edge
+const NOTE_HEIGHT_MM = 29; // from 267.55 mm to the bottom of the sheet
+const PT_MM = 25.4 / 72;
+
+/** Largest note size (14pt as on the official sheet) whose estimated lines fit above the page bottom. */
+export function noteFontPt(note: string): number {
+  for (let pt = 14; pt > 6; pt -= 0.5) {
+    const charsPerLine = Math.floor(NOTE_WIDTH_MM / (pt * PT_MM * 0.43)); // ≈ average Times character width
+    const lines = note.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / charsPerLine)), 0);
+    if (lines * pt * (5.75 / 14) <= NOTE_HEIGHT_MM) return pt;
+  }
+  return 6;
+}
+
+/** Absolutely positioned text at x/y millimetres (the y is the top of the line box). */
+const at = (x: number, y: number, body: SafeHtml | string, cls = '', style = '') =>
+  html`<div class="a ${cls}" style="left:${x}mm;top:${y}mm;${style}">${body}</div>`;
+
+const SUBJECT_MIN_PT = 6.5;
+
+function subjectRows(s: GradeSheetData['result']['subjects'][number], cellPt: number): SafeHtml {
   const n = s.components.length;
+  // "Comp. Soc. Std. & life Skill (Th)" (33 characters) is the longest label that fits at full size.
+  const subjPt = fitPt(s.name.length + 5, 33, cellPt, SUBJECT_MIN_PT);
   return html`<tbody class="subject">${s.components.map(
     (c, i) => html`<tr class="${[i === 0 ? 'first' : '', i === n - 1 ? 'last' : ''].join(' ')}">
-      <td class="c">${c.code}</td>
-      <td class="l">${s.name} (${typeLabel[c.type]})</td>
-      <td class="c">${c.creditHour.toFixed(2)}</td>
-      <td class="c">${c.outcome === 'ABSENT' || c.outcome === 'WITHHELD' ? '' : gp(c.gradePoint)}</td>
-      <td class="c">${c.grade}</td>
-      ${i === 0 ? html`<td class="c span" rowspan="${n}">${s.finalGrade}</td><td class="c span" rowspan="${n}">${s.remarks}</td>` : ''}
+      <td class="code">${c.code}</td>
+      <td class="subj ${subjPt === SUBJECT_MIN_PT ? 'wrap' : ''}" style="font-size:${subjPt}pt">${s.name} (${typeLabel[c.type]})</td>
+      <td class="ch">${c.creditHour.toFixed(2)}</td>
+      <td class="gp">${c.outcome === 'ABSENT' || c.outcome === 'WITHHELD' ? '' : gp(c.gradePoint)}</td>
+      <td class="grade">${c.grade}</td>
+      ${i === 0 ? html`<td class="fg span" rowspan="${n}">${s.finalGrade}</td><td class="c span" rowspan="${n}">${s.remarks}</td>` : ''}
     </tr>`,
   )}</tbody>`;
 }
@@ -94,64 +155,73 @@ function subjectRows(s: GradeSheetData['result']['subjects'][number]): SafeHtml 
 function sheet(d: GradeSheetData, logo: string | null): SafeHtml {
   const { school, exam, student, result } = d;
   const gpa = result.gpaWithheld ? '—' : formatGp(result.gpa);
-  const examName = exam.name.toUpperCase();
+  const rows = result.subjects.reduce((sum, s) => sum + s.components.length, 0);
+  const row = rowHeightMm(rows);
+  // Text shrinks with shorter rows so a row never grows past its height.
+  const cellPt = Math.min(12, Math.floor(((12 * row) / ROW_MM) * 2) / 2);
+  const examLine = `IN THE ${exam.name.toUpperCase()} EXAMINATION CONDUCTED IN ${exam.examYearBs} B.S. (${exam.examYearAd} A.D.)`;
+  const note = school.gradesheetNote ?? (exam.theoryOnly ? THEORY_ONLY_GRADESHEET_NOTE : DEFAULT_GRADESHEET_NOTE);
+  const notePt = noteFontPt(note);
 
-  return html`<section class="sheet">
+  return html`<section class="sheet" style="--row:${row}mm;--cell:${cellPt}pt">
     ${hasMissingMarks(result)
       ? html`<div class="watermark">INCOMPLETE</div>`
       : d.provisional
         ? html`<div class="watermark">PROVISIONAL</div>`
         : ''}
-    <div class="head">
-      <div>${logo ? html`<div class="logo"><img src="${logo}" alt=""></div>` : ''}</div>
-      <div>
-        <h1>${school.name}</h1>
-        ${school.address ? html`<div class="addr">${school.address}</div>` : ''}
-        <div class="title">GRADE-SHEET</div>
-      </div>
-      <div></div>
-    </div>
+    ${logo ? html`<div class="a logo"><img src="${logo}" alt=""></div>` : ''}
+    <div class="a school">${school.name}</div>
+    ${school.address ? html`<div class="a addr">${school.address}</div>` : ''}
+    <div class="a title">GRADE-SHEET</div>
 
     <div class="info">
-      <div>THE GRADE(S) SECURED BY:<span class="gap"></span><b>${student.fullName.toUpperCase()}</b></div>
-      <div>DATE OF BIRTH:<span class="gap"></span><b>${slashDate(student.dobBs)}</b><span class="gap-s"></span><b>B.S.</b><span class="gap-s"></span><b>(</b><span class="gap"></span><b>${slashDate(student.dobAd)} A.D.</b><span class="gap-s"></span><b>)</b></div>
-      <div>REGISTRATION NO.<span class="gap-s"></span><b>${student.nebRegistrationNo ?? ''}</b><span class="gap"></span><span class="gap"></span>SYMBOL NO.<span class="gap-s"></span><b>${student.symbolNo ?? ''}</b><span class="gap"></span><b>GRADE ${exam.gradeRoman}</b></div>
-      <div>IN THE ${examName} EXAMINATION CONDUCTED IN<span class="gap-s"></span><b>${exam.examYearBs} B.S. (${exam.examYearAd} A.D.)</b></div>
-      <div>ARE GIVEN BELOW.</div>
+      ${at(12.6, 45.3, 'THE GRADE(S) SECURED BY:')}
+      ${at(89.4, 45.3, html`<b>${student.fullName.toUpperCase()}</b>`, 'wrap', `max-width:114mm;font-size:${fitPt(student.fullName.length, 32, 14, 8)}pt`)}
+      ${at(12.6, 54.8, 'DATE OF BIRTH:')}
+      ${at(58.4, 54.8, html`<b>${slashDate(student.dobBs)}</b>`)}
+      ${at(84.9, 54.8, html`<b>B.S.</b>`)}
+      ${at(99.5, 54.8, html`<b>(</b>`)}
+      ${at(109.3, 54.8, html`<b>${slashDate(student.dobAd)} A.D.</b><b class="close">)</b>`)}
+      ${at(12.6, 64.9, 'REGISTRATION NO.')}
+      ${at(60.6, 64.9, html`<b>${student.nebRegistrationNo ?? ''}</b>`)}
+      ${at(101.5, 64.9, 'SYMBOL NO.')}
+      ${at(136.2, 64.9, html`<b>${student.symbolNo ?? ''}</b>`)}
+      ${at(162.7, 64.9, html`<b>GRADE ${exam.gradeRoman}</b>`)}
+      ${at(12.6, 74.4, html`IN THE ${exam.name.toUpperCase()} EXAMINATION CONDUCTED IN<b class="gap">${exam.examYearBs} B.S. (${exam.examYearAd} A.D.)</b>`, 'wrap', `max-width:191mm;font-size:${fitPt(examLine.length, 70, 14, 8)}pt`)}
+      ${at(12.6, 83.9, 'ARE GIVEN BELOW.')}
     </div>
 
+    <div class="body">
     <table>
       <colgroup>
-        <col style="width:12%"><col style="width:34%"><col style="width:9%"><col style="width:10%">
-        <col style="width:10%"><col style="width:10%"><col style="width:15%">
+        <col style="width:25.3mm"><col style="width:60.05mm"><col style="width:16.65mm"><col style="width:22mm">
+        <col style="width:18.8mm"><col style="width:19.8mm"><col style="width:23.1mm">
       </colgroup>
       <thead><tr>
         <th>SUBJECT<br>CODE</th>
-        <th>SUBJECTS</th>
+        <th class="subjects">SUBJECTS</th>
         <th>CREDIT<br>HOURS<br>(CH)</th>
         <th>GRADE<br>POINT<br>(GP)</th>
         <th>GRADE</th>
         <th>FINAL<br>GRADE<br>(FG)</th>
         <th>REMARKS</th>
       </tr></thead>
-      ${result.subjects.map(subjectRows)}
+      ${result.subjects.map((s) => subjectRows(s, cellPt))}
     </table>
-    <div class="gpa">Grade Point Average (GPA)<span>${gpa}</span></div>
+    <div class="gpa"><div class="a gpa-label">Grade Point Average (GPA)</div><div class="a gpa-value">${gpa}</div></div>
+    </div>
 
     <div class="foot">
-      <div class="left">
-        <p>PREPARED BY:-${school.preparedByName ? html` <b>${school.preparedByName}</b>` : DOTS}</p>
-        <p>CHECKED BY:-${school.checkedByName ? html` <b>${school.checkedByName}</b>` : DOTS}</p>
-        <p>DATE OF ISSUE:-<span class="gap-s"></span><b>${exam.issueDateBs ? `${exam.issueDateBs} B.S.` : ''}</b></p>
-      </div>
-      <div class="right">
-        <div>........................................</div>
-        ${school.principalName ? html`<div>${school.principalName.toUpperCase()}</div>` : ''}
-        <div>${school.principalTitle.toUpperCase()}</div>
-      </div>
+      ${at(16.3, 234.0, html`PREPARED BY:-${school.preparedByName ? html` <b>${school.preparedByName}</b>` : DOTS}`)}
+      ${at(16.3, 244.8, html`CHECKED BY:-${school.checkedByName ? html` <b>${school.checkedByName}</b>` : DOTS}`)}
+      ${at(16.3, 255.7, 'DATE OF ISSUE:-')}
+      ${exam.issueDateBs ? at(58.7, 255.7, html`<b>${exam.issueDateBs} B.S.</b>`) : ''}
+      <div class="a sign" style="top:246.2mm">........................................</div>
+      ${school.principalName ? html`<div class="a sign" style="top:252.0mm;font-size:${fitPt(school.principalName.length, 22, 14, 8)}pt">${school.principalName.toUpperCase()}</div>` : ''}
+      <div class="a sign" style="top:257.8mm">${school.principalTitle.toUpperCase()}</div>
     </div>
     <div class="rule"></div>
-    <div class="note">${school.gradesheetNote ?? (exam.theoryOnly ? THEORY_ONLY_GRADESHEET_NOTE : DEFAULT_GRADESHEET_NOTE)}</div>
+    <div class="a note" style="font-size:${notePt}pt;line-height:${Math.round(((5.75 * notePt) / 14) * 100) / 100}mm">${note}</div>
   </section>`;
 }
 
