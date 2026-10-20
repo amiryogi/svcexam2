@@ -42,3 +42,45 @@ export function mergeConflicts(
   for (const id of conflicted) next.add(id);
   return next;
 }
+
+/** What the marks box shows for a student who is absent or withheld. */
+export const STATUS_SHORT: Record<Exclude<MarkStatus, 'PRESENT'>, string> = { ABSENT: 'AB', WITHHELD: 'W' };
+
+/**
+ * Keyboard shortcuts in the marks box: A = absent, W = withheld. In an absent/withheld cell,
+ * typing a digit starts a mark and Backspace/Delete/P clears it back to present.
+ * Returns the new cell, or null to let the key behave normally.
+ */
+export function cellFromKey(key: string, cell: Cell): Cell | null {
+  const k = key.toLowerCase();
+  if (k === 'a') return { marks: '', status: 'ABSENT' };
+  if (k === 'w') return { marks: '', status: 'WITHHELD' };
+  if (cell.status === 'PRESENT') return null;
+  if (/^[\d.]$/.test(key)) return { marks: key, status: 'PRESENT' };
+  if (key === 'Backspace' || key === 'Delete' || k === 'p') return { marks: '', status: 'PRESENT' };
+  return null;
+}
+
+/** One pasted value: a mark, blank, or an absent / withheld code as written in Excel ledgers. */
+export function parseMarkText(text: string): Cell {
+  const t = text.trim();
+  if (/^(a|ab|abs|absent)$/i.test(t)) return { marks: '', status: 'ABSENT' };
+  if (/^(w|wh|withheld)$/i.test(t)) return { marks: '', status: 'WITHHELD' };
+  return { marks: t, status: 'PRESENT' };
+}
+
+/**
+ * A column copied from Excel: one value per line, first column only. The trailing line break
+ * Excel adds is dropped; blank lines in between stay as blank marks so rows stay aligned.
+ */
+export function parsePastedColumn(text: string): Cell[] {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  while (lines.length && lines.at(-1)!.trim() === '') lines.pop();
+  return lines.map((line) => parseMarkText(line.split('\t')[0] ?? ''));
+}
+
+/** Distinct sections of a class, optionally within one stream, sorted. */
+export function classSections(enrollments: { streamId: number; section: string }[], streamId: number | null): string[] {
+  const set = new Set(enrollments.filter((e) => streamId === null || e.streamId === streamId).map((e) => e.section));
+  return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}

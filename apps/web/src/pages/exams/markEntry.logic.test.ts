@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isDirty, mergeConflicts, savableIds, validateCell } from './markEntry.logic';
+import { cellFromKey, classSections, isDirty, mergeConflicts, parsePastedColumn, savableIds, validateCell } from './markEntry.logic';
 
 describe('validateCell', () => {
   it('accepts empty, absent and in-range marks', () => {
@@ -37,5 +37,52 @@ describe('conflicts and autosave', () => {
 
   it('clears a conflict once that row is sent again and saves', () => {
     expect([...mergeConflicts(new Set([5]), [5], [])]).toEqual([]);
+  });
+});
+
+describe('cellFromKey', () => {
+  const present = { marks: '45', status: 'PRESENT' as const };
+  const absent = { marks: '', status: 'ABSENT' as const };
+  it('sets absent and withheld with A and W', () => {
+    expect(cellFromKey('a', present)).toEqual({ marks: '', status: 'ABSENT' });
+    expect(cellFromKey('W', present)).toEqual({ marks: '', status: 'WITHHELD' });
+  });
+  it('leaves ordinary typing in a present cell alone', () => {
+    expect(cellFromKey('5', present)).toBeNull();
+    expect(cellFromKey('Backspace', present)).toBeNull();
+  });
+  it('turns an absent cell back into a mark', () => {
+    expect(cellFromKey('7', absent)).toEqual({ marks: '7', status: 'PRESENT' });
+    expect(cellFromKey('Backspace', absent)).toEqual({ marks: '', status: 'PRESENT' });
+    expect(cellFromKey('ArrowDown', absent)).toBeNull();
+  });
+});
+
+describe('parsePastedColumn', () => {
+  it('reads an Excel column with absent codes, blanks and a trailing line break', () => {
+    expect(parsePastedColumn('45\r\nAB\r\n\r\n60.5\tignored\r\nW\r\n')).toEqual([
+      { marks: '45', status: 'PRESENT' },
+      { marks: '', status: 'ABSENT' },
+      { marks: '', status: 'PRESENT' },
+      { marks: '60.5', status: 'PRESENT' },
+      { marks: '', status: 'WITHHELD' },
+    ]);
+  });
+  it('keeps unreadable values so validation can flag them', () => {
+    expect(parsePastedColumn('4o')).toEqual([{ marks: '4o', status: 'PRESENT' }]);
+  });
+});
+
+describe('classSections', () => {
+  const rows = [
+    { streamId: 1, section: 'B' },
+    { streamId: 1, section: 'A' },
+    { streamId: 2, section: 'C' },
+    { streamId: 1, section: 'A' },
+    { streamId: 2, section: '' },
+  ];
+  it('lists distinct sections, optionally for one stream', () => {
+    expect(classSections(rows, null)).toEqual(['A', 'B', 'C']);
+    expect(classSections(rows, 2)).toEqual(['C']);
   });
 });

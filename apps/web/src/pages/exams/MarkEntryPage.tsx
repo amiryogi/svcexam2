@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { CheckCircle2, CloudUpload, TriangleAlert } from 'lucide-react';
+import { CheckCircle2, ChevronLeft, ChevronRight, CloudUpload, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
@@ -8,6 +8,7 @@ import {
   gradeComponent,
   NEB_RULES,
   type EffectiveExamComponent,
+  type ExamProgressItem,
   type GradingRules,
   type MarksGrid,
   type MarksSaveResult,
@@ -16,10 +17,20 @@ import {
 import { api } from '../../api/client';
 import type { Enrollment, GradeScale } from '../../api/types';
 import { useExams, useStreams } from '../../api/hooks';
-import { Alert, Badge, Button, Card, EmptyState, ErrorBlock, Field, Input, LoadingBlock, PageHeader, Select, Table, Td, Th } from '../../components/ui';
+import { Alert, Badge, Button, Card, EmptyState, ErrorBlock, Field, LoadingBlock, PageHeader, Select, Table, Td, Th } from '../../components/ui';
 import { gradeLabel } from '../../lib/format';
 import { toastError } from '../../lib/forms';
-import { isDirty, mergeConflicts, savableIds, validateCell as validate, type Cell } from './markEntry.logic';
+import {
+  cellFromKey,
+  classSections,
+  isDirty,
+  mergeConflicts,
+  parsePastedColumn,
+  savableIds,
+  STATUS_SHORT,
+  validateCell as validate,
+  type Cell,
+} from './markEntry.logic';
 
 const AUTOSAVE_MS = 2000;
 
@@ -40,6 +51,7 @@ export function MarkEntryPage() {
     if (value) next.set(key, value);
     else next.delete(key);
     if (key === 'examId') next.delete('componentId');
+    if (key === 'streamId') next.delete('section');
     setParams(next, { replace: true });
   };
 
@@ -55,12 +67,45 @@ export function MarkEntryPage() {
     return s ? { gradeBands: s.gradeBands, finalGradeBands: s.finalGradeBands, withholdGpaOnNg: s.withholdGpaOnNg } : NEB_RULES;
   }, [scales.data, exam?.gradeScaleId]);
 
+  // Entered / expected per component, shown in the subject list.
+  const progress = useQuery({
+    queryKey: ['exam-progress', examId],
+    queryFn: () => api<ExamProgressItem[]>(`/exams/${examId}/progress`),
+    enabled: Boolean(examId),
+  });
+  const progressById = new Map(progress.data?.map((p) => [p.subjectComponentId, p]));
+  const progressText = (id: number) => {
+    const p = progressById.get(id);
+    if (!p) return '';
+    return p.entered >= p.expected ? ` · ✓ ${p.entered}/${p.expected}` : ` · ${p.entered}/${p.expected}`;
+  };
+
+  // The exam's class, for the stream and section lists (only those that have students).
+  const classRows = useQuery({
+    queryKey: ['enrollments', exam?.academicYearId, exam?.grade, 'class'],
+    queryFn: () => api<Enrollment[]>('/enrollments', { query: { academicYearId: exam!.academicYearId, grade: exam!.grade } }),
+    enabled: Boolean(exam),
+  });
+  const classStreamIds = new Set(classRows.data?.map((e) => e.streamId));
+  const streamOptions = classRows.data ? (streams.data?.filter((s) => classStreamIds.has(s.id)) ?? []) : (streams.data ?? []);
+  const sectionOptions = classSections(classRows.data ?? [], streamId ? Number(streamId) : null);
+  if (section && !sectionOptions.includes(section)) sectionOptions.push(section);
+
+  const included = components.data?.filter((c) => c.included) ?? [];
+  const at = included.findIndex((c) => c.subjectComponentId === componentId);
+  const label = (c: EffectiveExamComponent) => `${c.subjectName} (${c.type === 'TH' ? 'Theory' : 'Internal'})`;
+  const nav = {
+    prev: at > 0 ? { id: included[at - 1]!.subjectComponentId, label: label(included[at - 1]!) } : null,
+    next: at >= 0 && at < included.length - 1 ? { id: included[at + 1]!.subjectComponentId, label: label(included[at + 1]!) } : null,
+    go: (id: number) => setParam('componentId', String(id)),
+  };
+
   const openExams = exams.data?.filter((e) => e.status === 'MARK_ENTRY') ?? [];
   const otherExams = exams.data?.filter((e) => e.status !== 'MARK_ENTRY') ?? [];
 
   return (
     <>
-      <PageHeader title="Mark entry" description="Choose an exam and a subject component, then type marks. Use Enter or ↑/↓ to move between students." />
+      <PageHeader title="Mark entry" description="Choose an exam and a subject component, then type marks: A for absent, W for withheld. Enter or ↑/↓ moves between students. You can also paste a column of marks copied from Excel." />
       <Card className="mb-4 grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Exam">
           <Select value={examId ?? ''} onChange={(e) => setParam('examId', e.target.value || null)}>
@@ -80,9 +125,9 @@ export function MarkEntryPage() {
         <Field label="Subject component" className="lg:col-span-2">
           <Select value={componentId ?? ''} disabled={!components.data} onChange={(e) => setParam('componentId', e.target.value || null)}>
             <option value="">Choose subject…</option>
-            {components.data?.filter((c) => c.included).map((c) => (
+            {included.map((c) => (
               <option key={c.subjectComponentId} value={c.subjectComponentId}>
-                {c.nebCode} · {c.subjectName} — {c.type === 'TH' ? 'Theory' : 'Internal'} (FM {c.fullMark})
+                {c.nebCode} · {c.subjectName} — {c.type === 'TH' ? 'Theory' : 'Internal'} (FM {c.fullMark}){progressText(c.subjectComponentId)}
               </option>
             ))}
           </Select>
@@ -91,11 +136,14 @@ export function MarkEntryPage() {
           <Field label="Stream">
             <Select value={streamId} onChange={(e) => setParam('streamId', e.target.value || null)}>
               <option value="">All</option>
-              {streams.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {streamOptions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
           </Field>
           <Field label="Section">
-            <Input value={section} onChange={(e) => setParam('section', e.target.value.toUpperCase() || null)} />
+            <Select value={section} onChange={(e) => setParam('section', e.target.value || null)}>
+              <option value="">All</option>
+              {sectionOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+            </Select>
           </Field>
         </div>
       </Card>
@@ -103,13 +151,19 @@ export function MarkEntryPage() {
       {!examId || !componentId ? (
         <Card><EmptyState title="Choose an exam and a subject component" description={exams.data?.length === 0 ? 'Create an exam first.' : undefined} action={exams.data?.length === 0 ? <Link to="/exams"><Button>Go to exams</Button></Link> : undefined} /></Card>
       ) : (
-        <MarksGridView key={`${examId}-${componentId}-${streamId}-${section}`} examId={examId} componentId={componentId} streamId={streamId} section={section} rules={rules} />
+        <MarksGridView key={`${examId}-${componentId}-${streamId}-${section}`} examId={examId} componentId={componentId} streamId={streamId} section={section} rules={rules} nav={nav} />
       )}
     </>
   );
 }
 
-function MarksGridView({ examId, componentId, streamId, section, rules }: { examId: number; componentId: number; streamId: string; section: string; rules: GradingRules }) {
+interface SubjectNav {
+  prev: { id: number; label: string } | null;
+  next: { id: number; label: string } | null;
+  go: (id: number) => void;
+}
+
+function MarksGridView({ examId, componentId, streamId, section, rules, nav }: { examId: number; componentId: number; streamId: string; section: string; rules: GradingRules; nav: SubjectNav }) {
   const qc = useQueryClient();
   const queryKey = ['marks', examId, componentId, streamId, section];
   const grid = useQuery({
@@ -209,6 +263,16 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
     return () => clearTimeout(t);
   }, [savableKey, isPending, mutate, grid.data?.editable, edits]);
 
+  // Save valid changes when the grid closes (another subject, filter or page) instead of losing them
+  // to the autosave delay. The ref always holds the latest values.
+  const flush = useRef<() => void>(() => {});
+  useEffect(() => {
+    flush.current = () => {
+      if (savable.length && grid.data?.editable) mutate(savable);
+    };
+  });
+  useEffect(() => () => flush.current(), []);
+
   // Warn before leaving with unsaved changes.
   const hasUnsaved = dirtyIds.length > 0;
   useEffect(() => {
@@ -255,6 +319,56 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
     return c.status !== 'PRESENT' || c.marks.trim() !== '';
   }).length;
 
+  // Valid changes save on the way out; invalid or conflicted ones would be lost, so ask first.
+  const goTo = (id: number) => {
+    const stuck = dirtyIds.length - savable.length;
+    if (stuck && !window.confirm(`${stuck} mark(s) are invalid or need review and will not be saved. Go to the other subject anyway?`)) return;
+    nav.go(id);
+  };
+
+  /** Pastes a column copied from Excel into this row and the ones below it. */
+  const paste = (e: React.ClipboardEvent<HTMLInputElement>, index: number) => {
+    const values = parsePastedColumn(e.clipboardData.getData('text'));
+    if (!editable || values.length === 0) return;
+    e.preventDefault();
+    const targets = rows.slice(index, index + values.length);
+    setEdits((cur) => {
+      const next = { ...cur };
+      targets.forEach((r, k) => {
+        next[r.enrollmentId] = values[k]!;
+      });
+      return next;
+    });
+    // Pasting over a conflicted row is the user's decision, as with typing.
+    setConflicts((cur) => {
+      const next = new Set(cur);
+      targets.forEach((r) => next.delete(r.enrollmentId));
+      return next;
+    });
+    if (values.length > 1) {
+      const extra = values.length - targets.length;
+      toast.success(
+        `Pasted ${targets.length} value(s) from roll ${rows[index]?.rollNo ?? index + 1} down. Check the order matches.` +
+          (extra > 0 ? ` ${extra} extra value(s) were left out.` : ''),
+      );
+    }
+  };
+
+  const navButtons = (
+    <>
+      {nav.prev && (
+        <Button size="sm" variant="ghost" title={`Previous subject: ${nav.prev.label}`} onClick={() => goTo(nav.prev!.id)}>
+          <ChevronLeft className="size-4" /> {nav.prev.label}
+        </Button>
+      )}
+      {nav.next && (
+        <Button size="sm" variant="secondary" title={`Next subject: ${nav.next.label}`} onClick={() => goTo(nav.next!.id)}>
+          {nav.next.label} <ChevronRight className="size-4" />
+        </Button>
+      )}
+    </>
+  );
+
   return (
     <Card>
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-5 py-3">
@@ -274,6 +388,7 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
             <span className="flex items-center gap-1 text-green-700"><CheckCircle2 className="size-4" /> All saved</span>
           ))}
           {editable && <Button size="sm" disabled={!savable.length} loading={save.isPending} onClick={() => save.mutate(savable)}>Save now</Button>}
+          {navButtons}
         </div>
       </div>
       {!editable && <ReadOnlyNotice exam={grid.data.exam} included={component.included} type={component.type} />}
@@ -313,23 +428,40 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
                   <Td>
                     <input
                       ref={(el) => { inputs.current[i] = el; }}
-                      type="number"
+                      // Text, not number: a number input changes its value when the mouse wheel scrolls over it.
+                      type="text"
                       inputMode="decimal"
-                      step="0.01"
-                      min={0}
-                      max={component.fullMark}
-                      disabled={!editable || cell.status !== 'PRESENT'}
-                      value={cell.status === 'PRESENT' ? cell.marks : ''}
+                      autoComplete="off"
+                      disabled={!editable}
+                      value={cell.status === 'PRESENT' ? cell.marks : STATUS_SHORT[cell.status]}
+                      aria-label={`Marks for ${r.fullName}`}
                       aria-invalid={Boolean(error)}
-                      title={error ?? undefined}
-                      onChange={(e) => setCell(r.enrollmentId, { marks: e.target.value })}
+                      title={error ?? 'Type a mark, A for absent or W for withheld'}
+                      onChange={(e) =>
+                        setCell(
+                          r.enrollmentId,
+                          cell.status === 'PRESENT'
+                            ? { marks: e.target.value }
+                            : { marks: e.target.value.replace(/[^\d.]/g, ''), status: 'PRESENT' },
+                        )
+                      }
+                      onPaste={(e) => paste(e, i)}
                       onFocus={(e) => e.target.select()}
                       onKeyDown={(e) => {
+                        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+                          const next = cellFromKey(e.key, cell);
+                          if (next) {
+                            e.preventDefault();
+                            setCell(r.enrollmentId, next);
+                            return;
+                          }
+                        }
                         if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); move(i, 1); }
                         if (e.key === 'ArrowUp') { e.preventDefault(); move(i, -1); }
                       }}
                       className={clsx(
-                        'no-spin w-24 rounded-md border-0 px-2 py-1 text-right text-sm ring-1 ring-inset focus:ring-2 focus:outline-none disabled:bg-slate-100',
+                        'w-24 rounded-md border-0 px-2 py-1 text-right text-sm ring-1 ring-inset focus:ring-2 focus:outline-none disabled:bg-slate-100',
+                        cell.status !== 'PRESENT' && 'bg-slate-100 font-semibold text-slate-600',
                         error ? 'ring-red-500 focus:ring-red-500' : 'ring-slate-300 focus:ring-brand-600',
                       )}
                     />
@@ -365,6 +497,9 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
           </tbody>
         </Table>
       )}
+      {(nav.prev || nav.next) && rows.length > 0 && (
+        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">{navButtons}</div>
+      )}
     </Card>
   );
 }
@@ -372,7 +507,7 @@ function MarksGridView({ examId, componentId, streamId, section, rules }: { exam
 /** Explains an empty mark grid: wrong exam grade/year (nobody enrolled) vs. nobody taking this subject. */
 function EmptyClass({ exam, streamId, section }: { exam: MarksGrid['exam']; streamId: string; section: string }) {
   const enrolled = useQuery({
-    queryKey: ['enrollments', exam.academicYearId, exam.grade, 'count'],
+    queryKey: ['enrollments', exam.academicYearId, exam.grade, 'class'],
     queryFn: () => api<Enrollment[]>('/enrollments', { query: { academicYearId: exam.academicYearId, grade: exam.grade } }),
   });
   if (enrolled.isPending) return <LoadingBlock />;
