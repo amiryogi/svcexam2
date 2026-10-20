@@ -40,7 +40,13 @@ dashboardRouter.get('/summary', async (_req, res) => {
       const p = await examProgress(ex.id);
       const expected = p.reduce((s, x) => s + x.expected, 0);
       const entered = p.reduce((s, x) => s + Math.min(x.entered, x.expected), 0);
-      return { ...toExamDto(ex), progressPercent: expected ? Math.round((entered / expected) * 100) : 0 };
+      const missing =
+        ex.status === 'MARK_ENTRY'
+          ? p
+              .filter((x) => x.entered < x.expected)
+              .map((x) => ({ subjectComponentId: x.subjectComponentId, subjectName: x.subjectName, type: x.type, nebCode: x.nebCode, missing: x.expected - x.entered }))
+          : undefined;
+      return { ...toExamDto(ex), progressPercent: expected ? Math.round((entered / expected) * 100) : 0, missing };
     }),
   );
 

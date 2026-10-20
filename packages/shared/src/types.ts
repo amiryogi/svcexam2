@@ -183,6 +183,10 @@ export interface DashboardSummary {
   currentAcademicYear: { id: number; name: string } | null;
   totals: { students: number; enrolled: number };
   byGrade: { grade: number; stream: string; male: number; female: number; other: number }[];
-  exams: (ExamDto & { progressPercent: number })[];
+  exams: (ExamDto & {
+    progressPercent: number;
+    /** Exams open for mark entry: components still waiting for marks. Optional: older APIs don't send it. */
+    missing?: { subjectComponentId: number; subjectName: string; type: ComponentType; nebCode: string; missing: number }[];
+  })[];
   recentActivity: { id: number; action: string; entity: string; entityId: string | null; user: string | null; createdAt: string }[];
 }

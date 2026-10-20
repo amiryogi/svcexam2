@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { BookOpenCheck, GraduationCap, Users } from 'lucide-react';
+import { BookOpenCheck, CheckCircle2, GraduationCap, NotebookPen, Users } from 'lucide-react';
 import { Link } from 'react-router';
 import type { DashboardSummary } from '@svi/shared';
 import { api } from '../api/client';
@@ -59,6 +59,8 @@ export function DashboardPage() {
         <Stat label="Enrolled this year" value={d.totals.enrolled} icon={GraduationCap} />
         <Stat label="Exams this year" value={d.exams.length} icon={BookOpenCheck} />
       </div>
+
+      <MarksToDo exams={d.exams} />
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card>
@@ -129,5 +131,62 @@ export function DashboardPage() {
         </ul>
       </Card>
     </>
+  );
+}
+
+const SHOW_COMPONENTS = 6;
+
+/** What is left to do for exams open for mark entry: missing marks per subject, or ready to publish. */
+function MarksToDo({ exams }: { exams: DashboardSummary['exams'] }) {
+  const open = exams.filter((e) => e.status === 'MARK_ENTRY' && e.missing);
+  if (open.length === 0) return null;
+  return (
+    <Card className="mt-6">
+      <CardHeader title="Mark entry to do" description="Exams open for mark entry. Click a subject to enter its missing marks." />
+      <ul className="divide-y divide-slate-100">
+        {open.map((e) => {
+          const missing = [...(e.missing ?? [])].sort((a, b) => b.missing - a.missing);
+          const total = missing.reduce((sum, m) => sum + m.missing, 0);
+          return (
+            <li key={e.id} className="px-5 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Link to={`/exams/${e.id}`} className="font-medium text-slate-800 hover:text-brand-700">
+                  {e.name} · {gradeLabel(e.grade)}
+                </Link>
+                {total === 0 ? (
+                  <Link to={`/exams/${e.id}`} className="flex items-center gap-1 text-sm font-medium text-green-700">
+                    <CheckCircle2 className="size-4" /> All marks are in – ready to publish
+                  </Link>
+                ) : (
+                  <span className="text-sm text-amber-700">
+                    {total} mark{total === 1 ? '' : 's'} missing in {missing.length} subject{missing.length === 1 ? '' : 's'}
+                  </span>
+                )}
+              </div>
+              {missing.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {missing.slice(0, SHOW_COMPONENTS).map((m) => (
+                    <Link
+                      key={m.subjectComponentId}
+                      to={`/mark-entry?examId=${e.id}&componentId=${m.subjectComponentId}`}
+                      className="flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 hover:border-brand-300 hover:bg-brand-50"
+                    >
+                      <NotebookPen className="size-3.5 text-brand-700" />
+                      {m.subjectName} {m.type === 'TH' ? 'Theory' : 'Internal'}
+                      <span className="font-semibold text-amber-700">{m.missing}</span>
+                    </Link>
+                  ))}
+                  {missing.length > SHOW_COMPONENTS && (
+                    <Link to={`/exams/${e.id}`} className="px-1 py-1 text-xs font-medium text-brand-700">
+                      +{missing.length - SHOW_COMPONENTS} more
+                    </Link>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
   );
 }
