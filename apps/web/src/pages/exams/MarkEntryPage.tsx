@@ -371,6 +371,7 @@ function MarksGridView({ examId, componentId, streamId, section, rules, nav }: {
     } finally {
       if (mounted.current) setNavigating(false);
     }
+    if (!mounted.current) return;
     left.current = true;
     nav.go(id);
   };
