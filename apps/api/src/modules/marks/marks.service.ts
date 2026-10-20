@@ -11,6 +11,7 @@ import { recordAudit, type Ctx } from '../../lib/audit.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { num, prisma } from '../../lib/prisma.js';
 import { assertStatus, effectiveComponents, getExam, toExamDto } from '../exams/exams.service.js';
+import { countProgress } from './progress.logic.js';
 
 export async function getMarksGrid(examId: number, q: z.output<typeof marksQuery>): Promise<MarksGrid> {
   const exam = await getExam(prisma, examId);
@@ -157,29 +158,17 @@ export async function saveMarks(
 
 export async function examProgress(examId: number): Promise<ExamProgressItem[]> {
   const exam = await getExam(prisma, examId);
-  const components = (await effectiveComponents(prisma, exam)).filter((c) => c.included);
-  const [expected, entered] = await Promise.all([
-    prisma.enrollmentSubject.groupBy({
-      by: ['subjectId'],
-      where: { enrollment: { academicYearId: exam.academicYearId, grade: exam.grade, student: { deletedAt: null } } },
-      _count: { _all: true },
+  const activeEnrollment = { academicYearId: exam.academicYearId, grade: exam.grade, student: { deletedAt: null } };
+  const [components, taking, marks] = await Promise.all([
+    effectiveComponents(prisma, exam),
+    prisma.enrollmentSubject.findMany({
+      where: { enrollment: activeEnrollment },
+      select: { enrollmentId: true, subjectId: true },
     }),
-    prisma.mark.groupBy({
-      by: ['subjectComponentId'],
-      where: { examId, OR: [{ marks: { not: null } }, { status: { not: 'PRESENT' } }] },
-      _count: { _all: true },
+    prisma.mark.findMany({
+      where: { examId, enrollment: activeEnrollment, OR: [{ marks: { not: null } }, { status: { not: 'PRESENT' } }] },
+      select: { enrollmentId: true, subjectComponentId: true },
     }),
   ]);
-  const expectedBySubject = new Map(expected.map((e) => [e.subjectId, e._count._all]));
-  const enteredByComponent = new Map(entered.map((e) => [e.subjectComponentId, e._count._all]));
-  return components
-    .map((c) => ({
-      subjectComponentId: c.subjectComponentId,
-      subjectName: c.subjectName,
-      type: c.type,
-      nebCode: c.nebCode,
-      expected: expectedBySubject.get(c.subjectId) ?? 0,
-      entered: enteredByComponent.get(c.subjectComponentId) ?? 0,
-    }))
-    .filter((p) => p.expected > 0);
+  return countProgress(components, taking, marks);
 }
