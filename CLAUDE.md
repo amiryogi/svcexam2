@@ -72,6 +72,7 @@ Tests use Vitest and never touch a database. `apps/api/vitest.config.ts` sets a 
 - Templates must print correctly from a browser too: rely on `@page` for size and margins, and keep `print-color-adjust: exact` so backgrounds print.
 - Templates use the `html` tagged template from `pdf/html.ts`, which HTML-escapes every interpolation. Use `raw()` only for trusted constants such as CSS.
 - The grade sheet layout copies the school's official `Format of grade sheet.pdf` in the repo root: every block is placed in mm as measured on that PDF (`@page` margin 0, footer pinned to the bottom, body rows shrink past 12 rows via `rowHeightMm()`). Check changes by printing the template to PDF and comparing word positions with the official PDF (pdfplumber), not by eye.
+- Terminal exams may print A5 sheets instead (`Exam.sheetLayout`: `A5_GRADES` / `A5_MARKS`, see `examSheetLayout()`; send-up and final are always `OFFICIAL`). `gradeSheetsHtml()` hands them to `pdf/templates/resultSheetA5.ts`, which puts two per A4 landscape page; `marksSummary()` there computes the marks-only totals. Helpers shared by both templates live in `sheetHelpers.ts`.
 - `?as=base64` returns a file (the Excel ledger) as JSON with base64 data, because Microsoft Edge blanks PDF bytes in fetched responses.
 
 ## Web architecture (`apps/web/src`)

@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import {
   computeResult,
   examIncludesInternal,
+  examSheetLayout,
   examYears,
   fullName,
   hasMissingMarks,
@@ -106,6 +107,7 @@ function examMeta(exam: ExamWithYear): GradeSheetData['exam'] {
     resultDateBs: exam.resultDateBs,
     issueDateBs: exam.issueDateBs,
     theoryOnly: !examIncludesInternal(exam.type, exam.includeInternal),
+    sheetLayout: examSheetLayout(exam.type, exam.sheetLayout),
   };
 }
 

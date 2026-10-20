@@ -7,6 +7,7 @@ import {
   examComponentsSchema,
   examIncludesInternal,
   examListQuery,
+  examSheetLayout,
   examSchema,
   examStatusSchema,
   examUpdateSchema,
@@ -56,6 +57,7 @@ examsRouter.post('/', async (req, res) => {
         issueDateBs: input.issueDateBs ?? null,
         // New terminal exams are theory only unless internal marks are asked for.
         includeInternal: examIncludesInternal(input.type, input.includeInternal ?? false),
+        sheetLayout: examSheetLayout(input.type, input.sheetLayout),
         gradeScaleId: input.gradeScaleId ?? (await defaultGradeScaleId(tx)),
       },
       include: { academicYear: true },
@@ -75,6 +77,8 @@ examsRouter.put('/:id', async (req, res) => {
       ...input,
       // Switching to send-up / final turns internal marks on; turning them off keeps entered marks, they are just not counted.
       includeInternal: examIncludesInternal(input.type ?? before.type, input.includeInternal ?? before.includeInternal),
+      // Send-up and final exams always print the official sheet.
+      sheetLayout: examSheetLayout(input.type ?? before.type, input.sheetLayout ?? before.sheetLayout),
     };
     if (before.status === 'PUBLISHED') {
       // Only print details may change after publishing; results stay frozen.
@@ -86,6 +90,7 @@ examsRouter.put('/:id', async (req, res) => {
         throw conflict(`Only the print details can be changed after publishing (not: ${changed.join(', ')})`);
       }
       data = Object.fromEntries(Object.entries(input).filter(([k]) => isPrintField(k)));
+      if (input.sheetLayout !== undefined) data.sheetLayout = examSheetLayout(before.type, input.sheetLayout);
     } else {
       assertStatus(before, ['DRAFT', 'MARK_ENTRY'], 'edit the exam');
       const moving =

@@ -1,5 +1,5 @@
 import type { AcademicYear, Exam } from '@prisma/client';
-import { examIncludesInternal, examYears, INTERNAL_REQUIRED_EXAM_TYPES, type EffectiveExamComponent, type ExamDto } from '@svi/shared';
+import { examIncludesInternal, examSheetLayout, examYears, INTERNAL_REQUIRED_EXAM_TYPES, type EffectiveExamComponent, type ExamDto } from '@svi/shared';
 import { conflict, notFound } from '../../lib/errors.js';
 import { n, type Db } from '../../lib/prisma.js';
 
@@ -21,6 +21,7 @@ export const toExamDto = (e: Exam & { academicYear: AcademicYear }): ExamDto => 
   status: e.status,
   gradeScaleId: e.gradeScaleId,
   includeInternal: examIncludesInternal(e.type, e.includeInternal),
+  sheetLayout: examSheetLayout(e.type, e.sheetLayout),
   remarks: e.remarks,
   publishedAt: e.publishedAt?.toISOString() ?? null,
   };

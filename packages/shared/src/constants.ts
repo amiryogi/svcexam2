@@ -23,6 +23,18 @@ export type ExamType = (typeof EXAM_TYPES)[number];
 /** Exam types whose results always include internal (practical) marks as well as theory. */
 export const INTERNAL_REQUIRED_EXAM_TYPES: readonly ExamType[] = ['SENDUP', 'FINAL'];
 
+/**
+ * How result sheets print: the official A4 grade sheet, or (terminal exams only) an A5 sheet with
+ * grades only or marks only, two per A4 landscape page.
+ */
+export const RESULT_SHEET_LAYOUTS = ['OFFICIAL', 'A5_GRADES', 'A5_MARKS'] as const;
+export type ResultSheetLayout = (typeof RESULT_SHEET_LAYOUTS)[number];
+export const RESULT_SHEET_LAYOUT_LABEL: Record<ResultSheetLayout, string> = {
+  OFFICIAL: 'Official grade sheet (A4)',
+  A5_GRADES: 'A5, grades only (2 per A4)',
+  A5_MARKS: 'A5, marks only (2 per A4)',
+};
+
 export const EXAM_STATUSES = ['DRAFT', 'MARK_ENTRY', 'PUBLISHED', 'LOCKED'] as const;
 export type ExamStatus = (typeof EXAM_STATUSES)[number];
 
