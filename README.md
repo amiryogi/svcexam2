@@ -200,7 +200,12 @@ Logins only work on the production URL. Vercel preview deployments have other ad
 ### Updating
 
 - **Web:** push to the Git branch Vercel deploys from.
-- **API:** run `npm run build:deploy`, upload `svi-api.zip` and extract it over `svi-api` (this overwrites `dist/` and `prisma/`). Click **Run NPM Install** if dependencies changed, run `npx prisma migrate deploy` in Terminal if there are new migrations, then click **Restart**.
+- **API:**
+  1. Run `npm run build:deploy` on your computer (stop `npm run dev:api` first; on Windows it locks a Prisma file and the build fails with `EPERM`).
+  2. Upload `svi-api.zip` and extract it over `svi-api` (this overwrites `dist/` and `prisma/`).
+  3. Click **Run NPM Install** if dependencies changed **or `prisma/schema.prisma` changed** (any update with a new migration). It regenerates the server's Prisma client; without it the API starts but crashes on the new tables. Running `npx prisma generate` in Terminal does the same.
+  4. Run `npx prisma migrate deploy` in Terminal if there are new migrations.
+  5. Click **Restart**.
 - Very large class-wide prints can hit Vercel's proxy timeout. If one fails with a 504 error, print by stream or section.
 
 ## Security summary
