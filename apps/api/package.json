@@ -16,6 +16,7 @@
     "create-admin": "tsx --conditions=development src/scripts/createAdmin.ts",
     "import:access": "tsx --conditions=development src/scripts/importAccess.ts",
     "import:access:check": "tsx --conditions=development src/scripts/importAccess.check.ts",
+    "import:marks": "tsx --conditions=development src/scripts/importMarks.ts",
     "postinstall": "prisma generate",
     "db:seed:prod": "node dist/scripts/seed.js"
   },

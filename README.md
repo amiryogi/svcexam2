@@ -15,7 +15,7 @@ enrollment, terminal/final exams, mark entry, results and A4 grade-sheet printin
 ## Features
 
 - **Students**: create, edit, search, soft-delete/restore, CSV import. Dates of birth in B.S. and A.D. are converted automatically and checked against each other.
-- **Enrollment**: academic year → grade → stream → section/roll/symbol no. Subjects are chosen from **curriculum groups** (e.g. "Compulsory", "Social Studies / Mathematics", "Optional III"), and the API enforces the minimum and maximum per group. There is also a bulk symbol-number editor, a Grade XI → XII promotion that maps subjects by family code (only students who passed the published Grade XI Final move up), and a "Mark XII passed out" step that sets students who passed the Grade XII Final to *Passed out*. Academic years are named by their 4-digit B.S. year (e.g. `2084`).
+- **Enrollment**: academic year → grade → stream → section/roll/symbol no. Subjects are chosen from **curriculum groups** (e.g. "Compulsory", "Social Studies / Mathematics", "Optional III"), and the API enforces the minimum and maximum per group. There is also a bulk symbol-number editor, a Grade XI → XII promotion that maps subjects by family code (only students who passed the published Grade XI Final move up), and a "Mark XII passed out" step that sets students who passed the Grade XII Final to *Passed out*. Academic years are named by the B.S. year the session **starts** (e.g. `2083` for the 2083/84 session). Grade sheets print each exam's own **Conducted in** year, so a Grade XI Final held in 2084 belongs to academic year 2083 and prints "conducted in 2084".
 - **Exams**: any number of exams per year and grade (First Terminal, Send-up, Final …). An exam moves through `Draft → Mark entry → Published → Locked`. Full marks can be overridden per exam, and a component can be left out (e.g. a terminal exam with no internal marks).
 - **Dashboard**: for each exam open for mark entry, which subjects still have missing marks (one click opens that grid), or that all marks are in and it is ready to publish.
 - **Mark entry**: a spreadsheet-style grid with keyboard navigation (Enter / ↑ / ↓) and Present/Absent/Withheld status. Type `A` for absent or `W` for withheld, or paste a column of marks copied from Excel (`AB`/`W` codes are understood). The subject list shows how many marks are in, and Previous/Next buttons step through subjects; pending marks save when you switch. If two people change the same mark, neither is overwritten: the row shows both values and asks which to keep.
@@ -96,6 +96,7 @@ Each academic year's results live in their own Access file (e.g. `Final Exam XI 
    ```
    If the summary looks right, run the same command without `--dry-run`.
    - Locally, against a development database, use `npm run import:access -w @svi/api -- …` with the same options instead.
+   - `--year` is the session's **starting** year: a file of the XI Final held in 2083 is session 2082, so use `--year 2082 --exam-year-bs 2083`.
    - `--exam-year-bs` / `--exam-year-ad` are optional: by default, grade sheets print the academic year as the year the exam was conducted. Either way, it can be changed later under the exam's **Edit**.
 
 **In the app:**
@@ -115,7 +116,42 @@ Each academic year's results live in their own Access file (e.g. `Final Exam XI 
   - Students already enrolled in the same grade in another year stop the import, because that usually means last year's files were uploaded. Real repeaters are let through with `--allow-repeaters`.
   - Every subject combination is checked against the curriculum. If a student's subjects don't fit their recorded stream but fit exactly one other stream, that stream is used, and the dry run lists each correction (Access files often record the wrong stream).
 
-**Verified on real files:** the 2083 Grade XI file imported 64 students and 768 marks with no warnings. 63 of 64 GPAs are identical to the Access calculation. The exception is student 3 (0/50 in Computer Science theory), who Access wrongly graded "C" and who is now correctly NG with the GPA withheld.
+**Verified on real files:** the Grade XI file of the 2083 Final (session 2082) imported 64 students and 768 marks with no warnings. 63 of 64 GPAs are identical to the Access calculation. The exception is student 3 (0/50 in Computer Science theory), who Access wrongly graded "C" and who is now correctly NG with the GPA withheld.
+
+## Importing marks from Excel
+
+Terminal-exam marks kept by teachers in a workbook can be loaded into an existing exam with `importMarks`. The workbook needs:
+
+- one sheet per class, named (or titled) with the grade and stream, e.g. `XII MGMT`, `XI SCIENCE`;
+- a header row of subject abbreviations (`ENG`, `NEP`, `ECO`, `ACC`, `CHE`, `PHY`, `HM`, `CS` …) with a full-mark row under it (`FM 75`). The block may repeat further down a sheet;
+- one row per student: roll number in column A, name in column B, then one cell per subject.
+
+| Cell | Meaning |
+| --- | --- |
+| a number | theory mark (must not exceed the FM, which must match the exam's theory full mark) |
+| `A` | absent |
+| `*` or blank | left as it is (a blank also means the student doesn't take the subject) |
+
+Each grade's exam is found by year and name, and must be in **Mark entry**. Students are matched in this order:
+
+1. by stream and roll number, checked by name;
+2. by the same name under another roll (common after promotion, which keeps last year's roll numbers);
+3. by the clearly closest similar name (spelling differences, a missing middle name). The report lists each of these to check.
+
+Marks are saved through the same code as mark entry in the app, and each change is in the audit log. **The workbook wins:** marks already in the app are overwritten. Any error stops the import before anything is saved.
+
+**New students (`--create-students`):** students who match nobody in that year's class are created and enrolled, with the sheet's roll number and its non-blank subject columns as their subjects (checked against the curriculum). They get admission numbers like `SVI-2083-G11-MGMT001` (`--admission-prefix` changes `SVI-2083-`). The sheet then needs a **Gender** column (M/F), in the subject row or the FM row; for students without one, `--default-gender O` (or `M`/`F`) creates them with that gender as a placeholder, listed in the report, to correct in the app later. A student is never created when someone with the same or a similar name already exists in the app outside this year's classes: enroll or promote them in the app instead. A student with no marks at all is skipped. Fill in the other details (date of birth, NEB registration number …) in the app later.
+
+On the server, after uploading the deploy zip and the workbook (e.g. to `/home/<cpuser>/svi-import`):
+
+```bash
+source /home/<cpuser>/nodevenv/svi-api/24/bin/activate && cd /home/<cpuser>/svi-api
+node dist/scripts/importMarks.js --file "/home/<cpuser>/svi-import/First Term 2083.xlsx" --year 2083 --exam "First Term" --create-students
+# read the report, then save:
+node dist/scripts/importMarks.js --file "…" --year 2083 --exam "First Term" --create-students --user <your username> --commit
+```
+
+Without `--commit` nothing is saved. `--parse-only` checks just the workbook, without the database. Locally: `npm run import:marks -w @svi/api -- --file …`. Delete the workbook from the server afterwards: it contains student data.
 
 ## Deployment (Linux VPS with Docker)
 

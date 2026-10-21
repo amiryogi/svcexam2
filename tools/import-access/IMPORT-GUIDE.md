@@ -18,7 +18,7 @@ It takes about 20 minutes. Nothing is saved to the live database until **step 9*
 
 - This PC has the project in `D:\svcexam\svcexam2`, and `npm ci` has been run there once.
 - Microsoft Access, or the free *Microsoft Access Database Engine*, is installed. It's needed to read `.accdb` files.
-- You know the batch's **academic year** (a 4-digit B.S. year, e.g. `2081`) and **grade** (`11` or `12`).
+- You know the batch's **academic year**: the B.S. year its session **started** (e.g. `2081` for the 2081/82 session, whose Final was held in 2082; add `--exam-year-bs 2082` so grade sheets print that year), and its **grade** (`11` or `12`).
 
 ---
 
