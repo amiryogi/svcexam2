@@ -53,14 +53,17 @@ tr.total td { border-top: 0.35mm solid #000; height: 7mm; }
 .watermark { position: absolute; top: 40%; left: 0; right: 0; text-align: center; font-size: 40pt; color: rgba(200,0,0,.12); transform: rotate(-28deg); font-weight: bold; }
 `);
 
-/** Totals for a marks-only sheet. Absent and withheld count as 0; missing marks leave the totals blank. */
+/**
+ * Totals for a marks-only sheet. Absent counts as 0; missing marks leave the totals blank. A withheld
+ * mark withholds the whole result: RESULT reads WITHHELD and the totals stay blank.
+ */
 export interface MarksSummary {
   fullTotal: number;
-  /** null while any mark is missing. */
+  /** null while any mark is missing or withheld. */
   obtainedTotal: number | null;
-  /** obtained ÷ full × 100 to 2 decimals; null while any mark is missing. */
+  /** obtained ÷ full × 100 to 2 decimals; null while any mark is missing or withheld. */
   percent: number | null;
-  result: 'PASS' | 'FAIL' | 'INCOMPLETE';
+  result: 'PASS' | 'FAIL' | 'INCOMPLETE' | 'WITHHELD';
 }
 
 export function marksSummary(result: ExamResult): MarksSummary {
@@ -68,14 +71,17 @@ export function marksSummary(result: ExamResult): MarksSummary {
   let fullH = 0;
   let obtainedH = 0;
   let pending = false;
+  let withheld = false;
   for (const s of result.subjects) {
     for (const c of s.components) {
       fullH += Math.round(c.fullMark * 100);
+      if (c.status === 'WITHHELD') withheld = true;
       if (c.status === 'ABSENT' || c.status === 'WITHHELD') continue;
       if (c.marks === null) pending = true;
       else obtainedH += Math.round(c.marks * 100);
     }
   }
+  if (withheld) return { fullTotal: fullH / 100, obtainedTotal: null, percent: null, result: 'WITHHELD' };
   const verdict = result.outcome === 'PASS' ? 'PASS' : result.outcome === 'NG' ? 'FAIL' : 'INCOMPLETE';
   if (pending || fullH === 0) return { fullTotal: fullH / 100, obtainedTotal: null, percent: null, result: verdict };
   return {

@@ -19,13 +19,22 @@ describe('marksSummary', () => {
     expect(marksSummary(result([comp(75, 52), comp(25, 20.5)]))).toEqual({ fullTotal: 100, obtainedTotal: 72.5, percent: 72.5, result: 'PASS' });
     expect(marksSummary(result([comp(75, 40), comp(75, 40.1)])).percent).toBe(53.4);
   });
-  it('counts absent and withheld as 0 and reports FAIL on NG', () => {
-    expect(marksSummary(result([comp(75, null, 'ABSENT'), comp(25, 20, 'WITHHELD'), comp(100, 60)], 'NG'))).toEqual({
+  it('counts absent as 0 and reports FAIL on NG', () => {
+    expect(marksSummary(result([comp(75, null, 'ABSENT'), comp(25, 20), comp(100, 60)], 'NG'))).toEqual({
       fullTotal: 200,
-      obtainedTotal: 60,
-      percent: 30,
+      obtainedTotal: 80,
+      percent: 40,
       result: 'FAIL',
     });
+  });
+  it('reports WITHHELD with blank totals when any mark is withheld, even beside an NG', () => {
+    expect(marksSummary(result([comp(75, null, 'WITHHELD'), comp(25, null, 'WITHHELD')], 'NG'))).toEqual({
+      fullTotal: 100,
+      obtainedTotal: null,
+      percent: null,
+      result: 'WITHHELD',
+    });
+    expect(marksSummary(result([comp(75, null, 'ABSENT'), comp(25, null, 'WITHHELD'), comp(100, 60)], 'NG')).result).toBe('WITHHELD');
   });
   it('leaves totals blank while a mark is missing', () => {
     expect(marksSummary(result([comp(75, 52), comp(25, null)], 'INCOMPLETE'))).toEqual({
