@@ -12,7 +12,7 @@ COPY packages/shared packages/shared
 COPY apps/web apps/web
 RUN npm run build -w @svi/web
 
-FROM nginx:1.29-alpine
+FROM nginx:1.31-alpine
 # Rendered with envsubst at start-up (only ${DOMAIN} is substituted).
 COPY docker/nginx.conf /etc/nginx/templates/default.conf.template
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
