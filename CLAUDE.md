@@ -91,7 +91,7 @@ Tests use Vitest and never touch a database. `apps/api/vitest.config.ts` sets a 
 - Yearly Access imports follow the README runbook (`tools/import-access/export-accdb.ps1` → `import:access:check` → `dist/scripts/importAccess.js` on the server). Every Access file numbers students from 1. So students are matched by NEB registration number, and new ones get `SVI-<year>-<StuId>`. Never match students by `StuId` or admission number alone.
 - **Live in production** with real student data:
   - API on NestNepal cPanel "Setup Node.js App" at `https://api.nevanhandicraft.com.np` (Passenger, `app.cjs`).
-  - Web on Vercel, which deploys on a push to `main`. `apps/web/vercel.json` rewrites `/api/*` to the API.
+  - Web as static files on the same cPanel account at `https://svc.nevanhandicraft.com.np`, calling the API cross-origin (`VITE_API_ORIGIN` in `api/client.ts`, CORS for `APP_ORIGIN` in `middleware/cors.ts`; both subdomains are one site, so the SameSite=Strict cookie works). Updated by hand: `npm run build:web-deploy` → extract `deploy/svi-web.zip` into the subdomain's document root (it carries the `.htaccess` for SPA fallback and CSP). It moved off Vercel because the host's Imunify360 blocked Vercel's proxy; `apps/web/vercel.json` is unused. Pushing to `main` no longer deploys the web app.
 
   Keep migrations additive, with defaults that preserve current behaviour. The API is updated by hand:
   1. `npm run build:deploy`;

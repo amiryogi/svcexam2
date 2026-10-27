@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { ExamDto, PublicBranding, SchoolInfo, SubjectDto } from '@svi/shared';
-import { api } from './client';
+import { api, apiUrl } from './client';
 import type { AcademicYear, Stream } from './types';
 
 export const qk = {
@@ -56,4 +56,4 @@ export function useBranding() {
   });
 }
 
-export const logoUrl = (b: PublicBranding | undefined) => (b?.hasLogo ? `/api/v1/public/logo?v=${b.version}` : null);
+export const logoUrl = (b: PublicBranding | undefined) => (b?.hasLogo ? apiUrl(`/public/logo?v=${b.version}`) : null);

@@ -7,6 +7,7 @@ import { env, isProd } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { prisma } from './lib/prisma.js';
 import { loadSession, requireAuth } from './middleware/auth.js';
+import { corsForWebApp } from './middleware/cors.js';
 import { csrfProtect, originCheck } from './middleware/csrf.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { apiLimiter } from './middleware/rateLimit.js';
@@ -45,13 +46,16 @@ export function createApp() {
         directives: { 'default-src': ["'none'"], 'frame-ancestors': ["'none'"] },
       },
       hsts: isProd ? { maxAge: 31_536_000, includeSubDomains: true } : false,
-      crossOriginResourcePolicy: { policy: 'same-origin' },
+      // same-site: the web app on its own subdomain shows the logo images.
+      crossOriginResourcePolicy: { policy: 'same-site' },
     }),
   );
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
 
   const api = Router();
+  // The web app may run on another subdomain (cPanel hosting); see middleware/cors.ts.
+  api.use(corsForWebApp);
   api.get('/health', async (_req, res) => {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ status: 'ok' });

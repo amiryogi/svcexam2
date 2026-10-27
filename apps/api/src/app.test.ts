@@ -44,6 +44,31 @@ describe('security middleware', () => {
     expect(res.headers['x-powered-by']).toBeUndefined();
   });
 
+  it('allows the web app origin with credentials and exposes X-Request-Id', async () => {
+    const res = await request(app).get('/api/v1/students').set('Origin', ORIGIN);
+    expect(res.headers['access-control-allow-origin']).toBe(ORIGIN);
+    expect(res.headers['access-control-allow-credentials']).toBe('true');
+    expect(res.headers['access-control-expose-headers']).toBe('X-Request-Id');
+    expect(res.headers['cross-origin-resource-policy']).toBe('same-site');
+  });
+
+  it('answers preflights from the web app and refuses other origins', async () => {
+    const ok = await request(app)
+      .options('/api/v1/auth/login')
+      .set('Origin', ORIGIN)
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'content-type, x-csrf-token');
+    expect(ok.status).toBe(204);
+    expect(ok.headers['access-control-allow-headers']).toContain('X-CSRF-Token');
+
+    const evil = await request(app)
+      .options('/api/v1/auth/login')
+      .set('Origin', 'https://evil.example')
+      .set('Access-Control-Request-Method', 'POST');
+    expect(evil.status).toBe(403);
+    expect(evil.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
   it('returns 404 outside the API', async () => {
     expect((await request(app).get('/nope')).status).toBe(404);
   });

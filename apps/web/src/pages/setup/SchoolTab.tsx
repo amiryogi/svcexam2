@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import type { z } from 'zod';
 import { settingsSchema, type SettingsInput } from '@svi/shared';
-import { api } from '../../api/client';
+import { api, apiUrl } from '../../api/client';
 import { qk, useSettings } from '../../api/hooks';
 import { Button, Card, CardHeader, ConfirmDialog, ErrorBlock, Field, Input, LoadingBlock, Textarea } from '../../components/ui';
 import { applyServerErrors, nullsToEmpty, toastError } from '../../lib/forms';
@@ -134,7 +134,7 @@ function LogoCard({
         >
           {present ? (
             <img
-              src={`/api/v1/settings/logo?kind=${kind}&v=${version}`}
+              src={apiUrl(`/settings/logo?kind=${kind}&v=${version}`)}
               alt={title}
               className={kind === 'web' ? 'size-32 rounded-full bg-white object-contain p-1.5 shadow' : 'max-h-36 object-contain'}
             />

@@ -1,6 +1,14 @@
 import type { ApiErrorBody } from '@svi/shared';
 
-const BASE = '/api/v1';
+/**
+ * Where the API lives. Empty (the default) means the same origin: dev (Vite proxy) and Docker (Nginx).
+ * The cPanel build sets VITE_API_ORIGIN, e.g. https://api.nevanhandicraft.com.np (scripts/build-web-deploy.mjs).
+ */
+const API_ORIGIN = (import.meta.env.VITE_API_ORIGIN ?? '').replace(/\/+$/, '');
+const BASE = `${API_ORIGIN}/api/v1`;
+
+/** Absolute API URL for things the browser loads itself, such as <img src>. */
+export const apiUrl = (path: string) => `${BASE}${path}`;
 
 let csrfToken: string | null = null;
 export const setCsrfToken = (token: string | null) => {
@@ -59,10 +67,11 @@ interface RequestOptions {
 }
 
 /**
- * Every API response carries X-Request-Id. A 403 without it came from the hosting firewall (Imunify360
- * bot-protection sometimes blocks requests arriving through Vercel's proxy), so it never reached the API
- * and is safe to send again, whatever the method. A block can last several seconds, so the retries
- * spread over about 15 s.
+ * Every API response carries X-Request-Id (exposed to the cross-origin web app by the API's CORS
+ * headers). A 403 without it came from the hosting firewall (Imunify360 bot-protection), so it never
+ * reached the API and is safe to send again, whatever the method. A block can last several seconds, so
+ * the retries spread over about 15 s. (Cross-origin, a firewall response without CORS headers surfaces
+ * as a network error instead, which is not retried.)
  */
 export const isFirewallBlock = (res: Response) => res.status === 403 && !res.headers.has('X-Request-Id');
 export const FIREWALL_RETRY_DELAYS_MS = [700, 2000, 4000, 8000];
@@ -99,7 +108,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   if (method !== 'GET' && csrfToken) headers['X-CSRF-Token'] = csrfToken;
 
   const send = () =>
-    fetch(buildUrl(path, opts.query), { method, headers, body, credentials: 'same-origin', signal: opts.signal });
+    fetch(buildUrl(path, opts.query), { method, headers, body, credentials: 'include', signal: opts.signal });
   let res = await send();
   for (const delay of FIREWALL_RETRY_DELAYS_MS) {
     if (!isFirewallBlock(res)) break;

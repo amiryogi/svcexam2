@@ -179,9 +179,15 @@ Without `--commit` nothing is saved. `--parse-only` checks just the workbook, wi
 
 **Scaling:** sessions are stored in MySQL, so the API is stateless and can be scaled with `--scale api=N` behind Nginx. The per-IP rate limiter is in-memory per replica, while account lockout is stored in the database and so applies across all replicas. If bulk PDF exports grow, move them to a job queue.
 
-## Deployment (cPanel Node.js hosting + Vercel)
+## Deployment (cPanel shared hosting)
 
-The API runs on cPanel hosting with **Setup Node.js App** and **Terminal** (here NestNepal, at `https://api.nevanhandicraft.com.np`). The web app runs on Vercel. Vercel forwards `/api/*` to the API ([apps/web/vercel.json](apps/web/vercel.json)), so the browser only ever talks to the Vercel address. The session cookie, CSRF check and logo images therefore work exactly as they do behind Nginx, and no CORS is needed.
+Both parts run on the same cPanel account (here NestNepal), each on its own subdomain:
+- **API:** a Node app (**Setup Node.js App**) at `https://api.nevanhandicraft.com.np`.
+- **Web app:** static files at `https://svc.nevanhandicraft.com.np`.
+
+The browser calls the API directly. The API allows exactly the web app's address (`APP_ORIGIN`) with CORS ([apps/api/src/middleware/cors.ts](apps/api/src/middleware/cors.ts)). Both subdomains are on the same *site*, so the `SameSite=Strict` session cookie, the CSRF check and the logo images all keep working.
+
+The web app used to run on Vercel, which forwarded `/api/*` to the API ([apps/web/vercel.json](apps/web/vercel.json), now unused). The host's Imunify360 firewall kept blocking requests coming from Vercel's servers, so the web app moved to the same hosting.
 
 ### API (cPanel)
 
@@ -201,9 +207,9 @@ The API runs on cPanel hosting with **Setup Node.js App** and **Terminal** (here
    | --- | --- |
    | `NODE_ENV` | `production` |
    | `DATABASE_URL` | `mysql://cpuser_svi:PASSWORD@localhost:3306/cpuser_svi` (URL-encode special characters in the password) |
-   | `APP_ORIGIN` | `https://<project>.vercel.app`, the exact Vercel production URL with no trailing slash |
+   | `APP_ORIGIN` | `https://svc.nevanhandicraft.com.np`, the web app's exact address, with no trailing slash |
    | `COOKIE_SECURE` | `true` |
-   | `TRUST_PROXY` | `2` (Vercel, then the web server; see the check below) |
+   | `TRUST_PROXY` | `1` (the hosting's web server in front of Node; see the check below) |
    | `STORAGE_DIR` | `/home/<cpuser>/svi-storage` |
 
 6. Click **Run NPM Install**. Then open **Terminal**, paste the `source …/activate && cd …` command shown at the top of the app page, and run:
@@ -217,36 +223,36 @@ The API runs on cPanel hosting with **Setup Node.js App** and **Terminal** (here
 **Printing:** grade sheets and ledgers are printed by the user's browser, so the server never runs Chrome. Shared hosting's process limit (about 100 threads per account on NestNepal, shared by all of the account's Node apps) is too low for headless Chromium, which needs about 50 threads. Direct PDF links to the API therefore fail there with "PDF rendering is not configured".
 
 **Shared-hosting gotchas we hit:**
-- Imunify360 bot-protection can block requests coming through Vercel's proxy with a 403 `Access denied by Imunify360 bot-protection`. In the app this shows as "The server's firewall blocked this request", often during mark entry, which sends the most requests.
-  - **Why it happens:** the API only ever sees Vercel's data-centre addresses. Those addresses change all the time, so an IP whitelist doesn't help.
-  - **The fix:** ask the host to **disable bot-protection (WebShield anti-bot) for the API subdomain**, or add a domain-level exclusion for it. The app has its own login, rate limiting and CSRF checks, and ordinary ModSecurity rules can stay on.
-  - **Until then:** the web app retries blocked requests for about 15 s and keeps unsaved marks on screen. Those marks save automatically once requests get through.
+- Imunify360 bot-protection blocked requests that came through Vercel's proxy (403 `Access denied by Imunify360 bot-protection`). The API only saw Vercel's data-centre addresses, and those change all the time, so no IP whitelist could help. That's why the web app now runs on the same hosting and browsers call the API directly.
+  - If blocks still happen, ask the host to disable bot-protection (WebShield anti-bot) for the API subdomain. The app has its own login, rate limiting and CSRF checks, and ordinary ModSecurity rules can stay on.
+  - The web app retries requests that the firewall blocks with a 403 for about 15 s, and keeps unsaved marks on screen until they save.
 - If cPanel Terminal or Setup Node.js App fail with `Resource temporarily unavailable`, the account is at its process limit. `kill -9 -1` in Terminal (a shell built-in, so it still works) ends all of the account's processes, and the Node apps restart on their next request.
 
-### Web app (Vercel)
+### Web app (cPanel subdomain)
 
-1. On Vercel, choose *Add New → Project*, import this Git repository and set **Root Directory** to `apps/web`. The Vite preset, `npm run build` and the `dist` output are the defaults. No environment variables are needed.
-2. Deploy, then copy the production URL into `APP_ORIGIN` on the server and restart the Node app.
-3. Sign in and complete **Setup** as in step 5 of the Docker section.
+1. **Build the bundle** on your PC: `npm run build:web-deploy`. This creates `deploy/svi-web.zip`, the built app for the API at `https://api.nevanhandicraft.com.np` (another API address: `npm run build:web-deploy -- --api-origin https://…`). It includes `.htaccess` files that replace what `vercel.json` did on Vercel: every app path is served `index.html`, plus the security headers (CSP allowing the API address) and caching.
+2. **Subdomain:** in cPanel → *Domains*, create `svc.nevanhandicraft.com.np`. Note its **document root** (e.g. `/home/<cpuser>/svc.nevanhandicraft.com.np`), then run *SSL/TLS Status → Run AutoSSL*.
+3. **Upload:** in *File Manager*, open the document root, delete anything already there (e.g. a default `index.html` or `cgi-bin`), upload `svi-web.zip` and extract it. Turn on *Settings → Show Hidden Files* to see the `.htaccess` files.
+4. **API settings:** in *Setup Node.js App*, set `APP_ORIGIN` to `https://svc.nevanhandicraft.com.np` and `TRUST_PROXY` to `1`, then **Restart**.
+5. Open `https://svc.nevanhandicraft.com.np`, sign in, and complete **Setup** as in step 5 of the Docker section if this is a new installation.
 
-Logins only work on the production URL. Vercel preview deployments have other addresses, so the API's Origin check rejects them. If you later add a custom domain on Vercel, change `APP_ORIGIN` to match it.
+Logins only work on the address in `APP_ORIGIN`; the API refuses every other origin.
 
 ### Checks after the first deploy
 
-- Open the **Audit** page and check that the IP address on your own sign-in is your real public IP. If it shows a Vercel or `127.0.0.1` address, change `TRUST_PROXY` (try `1` or `3`) and restart. The login rate limiter depends on this IP.
+- Open the **Audit** page and check that the IP address on your own sign-in is your real public IP. If it shows `127.0.0.1` or a server address, change `TRUST_PROXY` (try `2`) and restart. The login rate limiter depends on this IP.
 - Print a grade sheet and a ledger. Reload a deep link such as `/students` and check that you're still signed in.
 - Backups: turn on the host's database backups (e.g. JetBackup in cPanel), or download a copy regularly from *phpMyAdmin → Export*.
 
 ### Updating
 
-- **Web:** push to the Git branch Vercel deploys from.
+- **Web:** run `npm run build:web-deploy`, then in File Manager delete the old `assets` folder in the web app's document root, upload `svi-web.zip` and extract it, overwriting. No restart is needed. Pushing to Git no longer deploys the web app.
 - **API:**
   1. Run `npm run build:deploy` on your computer (stop `npm run dev:api` first; on Windows it locks a Prisma file and the build fails with `EPERM`).
   2. Upload `svi-api.zip` and extract it over `svi-api` (this overwrites `dist/` and `prisma/`).
   3. Click **Run NPM Install** if dependencies changed **or `prisma/schema.prisma` changed** (any update with a new migration). It regenerates the server's Prisma client; without it the API starts but crashes on the new tables. Running `npx prisma generate` in Terminal does the same.
   4. Run `npx prisma migrate deploy` in Terminal if there are new migrations.
   5. Click **Restart**.
-- Very large class-wide prints can hit Vercel's proxy timeout. If one fails with a 504 error, print by stream or section.
 
 ## Security summary
 

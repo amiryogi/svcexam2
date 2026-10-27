@@ -14,6 +14,7 @@
     "dev:web": "npm run dev -w @svi/web",
     "build": "npm run build -w @svi/shared && npm run build -w @svi/api && npm run build -w @svi/web",
     "build:deploy": "node scripts/build-api-deploy.mjs",
+    "build:web-deploy": "node scripts/build-web-deploy.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint .",
