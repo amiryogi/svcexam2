@@ -65,9 +65,12 @@ writeJson(path.join(out, 'package.json'), {
   private: true,
   type: 'module',
   engines: rootPkg.engines,
+  // No postinstall: on CloudLinux npm runs lifecycle scripts from ~/nodevenv/<app>/<ver>/lib, where there is
+  // no prisma/schema.prisma, so `prisma generate` fails there. It is run from the app root instead
+  // (scripts/cpanel.yml, or by hand after Run NPM Install).
   scripts: {
     start: 'node dist/server.js',
-    postinstall: 'prisma generate',
+    'db:generate': 'prisma generate',
     'db:deploy': 'prisma migrate deploy',
     'db:seed:prod': 'node dist/scripts/seed.js',
     'create-admin': 'node dist/scripts/createAdmin.js',

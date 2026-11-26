@@ -1,0 +1,21 @@
+---
+# Template for the .cpanel.yml at the root of the `deploy` branch. scripts/build-deploy-branch.mjs
+# fills in the home directory, the Node version and the web document root. cPanel's Git Version
+# Control runs these tasks, in order and in one shell, from the repository root when you click
+# "Deploy HEAD Commit".
+deployment:
+  tasks:
+    - export API_DIR={{HOME}}/svi-api
+    - export WEB_DIR={{HOME}}/{{WEB_ROOT}}
+    # API code: replace the built folders, keep node_modules, tmp and anything else in the app root.
+    - /bin/rm -rf $API_DIR/dist $API_DIR/prisma $API_DIR/shared
+    - /bin/cp -R api/. $API_DIR/
+    # Dependencies, the Prisma client and migrations, inside the app's Node environment. prisma generate
+    # is run here from the app root: an npm postinstall would run in ~/nodevenv, without the schema.
+    # npm install, not npm ci: node_modules in a cPanel Node app is a symlink into ~/nodevenv.
+    - . {{HOME}}/nodevenv/svi-api/{{NODE}}/bin/activate && cd $API_DIR && npm install --no-audit --no-fund && npx prisma generate && npx prisma migrate deploy
+    # Passenger restarts the app when tmp/restart.txt changes.
+    - /bin/mkdir -p $API_DIR/tmp && /bin/touch $API_DIR/tmp/restart.txt
+    # Web app: hashed assets are replaced, the rest overwritten (index.html, .htaccess files, favicon).
+    - /bin/rm -rf $WEB_DIR/assets
+    - /bin/cp -R web/. $WEB_DIR/

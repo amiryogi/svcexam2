@@ -14,6 +14,7 @@ npm run typecheck | lint | test | build   # what CI runs (.github/workflows/ci.y
 node scripts/audit-prod.mjs         # CI's prod dependency audit (high+); reviewed advisories are listed in it
 npm run import:marks -w @svi/api -- --file <xlsx> --year 2083 --exam "First Term"   # Excel marks import (+ --create-students), dry run unless --commit (README)
 npm run build:deploy                # deploy/svi-api.zip for cPanel hosting (scripts/build-api-deploy.mjs)
+npm run deploy:git                  # build locally, commit api/ + web/ + .cpanel.yml to the `deploy` branch and push; cPanel Git Version Control deploys it (scripts/build-deploy-branch.mjs, scripts/cpanel.yml)
 
 # single test file / single test
 npm test -w @svi/shared -- src/grading/engine.test.ts
@@ -90,12 +91,7 @@ Tests use Vitest and never touch a database. `apps/api/vitest.config.ts` sets a 
 - Line endings are mixed: some files are CRLF, others LF (`core.autocrlf=true`, no `.gitattributes`). Keep each file's existing endings when editing.
 - Yearly Access imports follow the README runbook (`tools/import-access/export-accdb.ps1` → `import:access:check` → `dist/scripts/importAccess.js` on the server). Every Access file numbers students from 1. So students are matched by NEB registration number, and new ones get `SVI-<year>-<StuId>`. Never match students by `StuId` or admission number alone.
 - **Live in production** with real student data:
-  - API on NestNepal cPanel "Setup Node.js App" at `https://api.nevanhandicraft.com.np` (Passenger, `app.cjs`).
-  - Web as static files on the same cPanel account at `https://svc.nevanhandicraft.com.np`, calling the API cross-origin (`VITE_API_ORIGIN` in `api/client.ts`, CORS for `APP_ORIGIN` in `middleware/cors.ts`; both subdomains are one site, so the SameSite=Strict cookie works). Updated by hand: `npm run build:web-deploy` → extract `deploy/svi-web.zip` into the subdomain's document root (it carries the `.htaccess` for SPA fallback and CSP). It moved off Vercel because the host's Imunify360 blocked Vercel's proxy; `apps/web/vercel.json` is unused. Pushing to `main` no longer deploys the web app.
+  - API on NestNepal cPanel "Setup Node.js App" at `https://api.nevanhandicraft.com.np` (Passenger, `app.cjs`). The account is on NestNepal's WebPro server since November 2026 (moved from Cloud Babal), which offers Node 22.x only and whose home directory is `/home2/nevanhan` (not `/home/nevanhan`). A server move needs the Node app recreated, the Passenger block cleared from the api subdomain's `.htaccess`, and the `api`/`svc` A records repointed (README "Moving to another cPanel server").
+  - Web as static files on the same cPanel account at `https://svc.nevanhandicraft.com.np`, calling the API cross-origin (`VITE_API_ORIGIN` in `api/client.ts`, CORS for `APP_ORIGIN` in `middleware/cors.ts`; both subdomains are one site, so the SameSite=Strict cookie works). Deployed by `npm run deploy:git` (fallback by hand: `npm run build:web-deploy` → extract `deploy/svi-web.zip` into the subdomain's document root; the bundle carries the `.htaccess` for SPA fallback and CSP). It moved off Vercel because the host's Imunify360 blocked Vercel's proxy; `apps/web/vercel.json` is unused. Pushing to `main` no longer deploys the web app.
 
-  Keep migrations additive, with defaults that preserve current behaviour. The API is updated by hand:
-  1. `npm run build:deploy`;
-  2. upload and extract `deploy/svi-api.zip`;
-  3. when `prisma/schema.prisma` changed, **Run NPM Install** (or `npx prisma generate` in the cPanel Terminal) so the server's Prisma client matches the schema;
-  4. `npx prisma migrate deploy` in the cPanel Terminal;
-  5. restart.
+  Keep migrations additive, with defaults that preserve current behaviour. Both are updated with `npm run deploy:git` (builds locally, commits `api/`, `web/` and a generated `.cpanel.yml` to the `deploy` branch, pushes), then in cPanel → Git Version Control → Pull or Deploy: **Update from Remote**, **Deploy HEAD Commit**. The `.cpanel.yml` copies the files, runs `npm install`, `prisma generate` and `prisma migrate deploy` in the app's nodevenv (the bundle has no postinstall: CloudLinux runs npm lifecycle scripts from `~/nodevenv/svi-api/22/lib`, where there is no schema), and restarts Passenger through `tmp/restart.txt`. The Node app itself (env vars, Node version) is still created by hand in Setup Node.js App; README "Deploying with Git" has the first-time steps. Fallback without Git Version Control: the zip steps in README (`npm run build:deploy`, extract `deploy/svi-api.zip`, Run NPM Install, `npx prisma generate`, `npx prisma migrate deploy`, restart).
