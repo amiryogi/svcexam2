@@ -1,0 +1,87 @@
+import { z } from 'zod';
+import { EXAM_STATUSES, EXAM_TYPES, INTERNAL_REQUIRED_EXAM_TYPES, MARK_STATUSES, RESULT_SHEET_LAYOUTS } from '../constants.js';
+import { bsDateSchema, decimal, gradeLevelSchema, idSchema, optionalText, requiredText } from './common.js';
+export const examSchema = z.object({
+    academicYearId: idSchema,
+    grade: gradeLevelSchema,
+    name: requiredText(80),
+    type: z.enum(EXAM_TYPES),
+    /** Optional: when empty, the academic year is printed (see examYears()). */
+    examYearBs: z.string().trim().regex(/^\d{4}$/, 'e.g. 2083').nullish().or(z.literal('').transform(() => null)),
+    examYearAd: z.string().trim().regex(/^\d{4}$/, 'e.g. 2026').nullish().or(z.literal('').transform(() => null)),
+    resultDateBs: bsDateSchema.nullish().or(z.literal('').transform(() => null)),
+    issueDateBs: bsDateSchema.nullish().or(z.literal('').transform(() => null)),
+    gradeScaleId: idSchema.optional(),
+    /** Terminal exams only; send-up and final exams always include internal marks (see examIncludesInternal()). */
+    includeInternal: z.boolean().optional(),
+    /** Terminal exams only; send-up and final exams always print the official sheet (see examSheetLayout()). */
+    sheetLayout: z.enum(RESULT_SHEET_LAYOUTS).optional(),
+    remarks: optionalText(500),
+});
+/** Year and grade can only change while the exam has no marks (checked by the API). */
+export const examUpdateSchema = examSchema.partial();
+/** Fields that only affect how grade sheets are printed; editable even after publishing. */
+export const EXAM_PRINT_FIELDS = ['examYearBs', 'examYearAd', 'resultDateBs', 'issueDateBs', 'sheetLayout', 'remarks'];
+/**
+ * Year printed as "conducted in … B.S. (… A.D.)". Uses the exam's own year when set, otherwise
+ * the first four digits of the academic year (e.g. "2083" or "2082/83" → 2083 B.S.); the A.D. year
+ * is the one in which that B.S. year begins (B.S. − 57).
+ */
+export function examYears(examYearBs, examYearAd, academicYear) {
+    const bs = examYearBs ?? academicYear.match(/\d{4}/)?.[0] ?? academicYear;
+    const ad = examYearAd ?? (/^\d{4}$/.test(bs) ? String(Number(bs) - 57) : '');
+    return { bs, ad };
+}
+/** Whether internal (practical) marks count in the exam: always for send-up / final, optional for terminal exams. */
+export function examIncludesInternal(type, includeInternal) {
+    return INTERNAL_REQUIRED_EXAM_TYPES.includes(type) || includeInternal;
+}
+/** Result sheet layout that applies: terminal exams use their own setting, other exams the official sheet. */
+export function examSheetLayout(type, layout) {
+    return type === 'TERMINAL' ? (layout ?? 'OFFICIAL') : 'OFFICIAL';
+}
+export const examListQuery = z.object({
+    academicYearId: idSchema.optional(),
+    grade: gradeLevelSchema.optional(),
+    status: z.enum(EXAM_STATUSES).optional(),
+});
+export const examComponentsSchema = z.object({
+    items: z
+        .array(z.object({
+        subjectComponentId: idSchema,
+        fullMark: decimal(1, 200),
+        passPercent: decimal(0, 100),
+        included: z.boolean(),
+    }))
+        .min(1),
+});
+export const examStatusSchema = z.object({ status: z.enum(EXAM_STATUSES) });
+export const publishSchema = z.object({
+    /** Publish even if some marks are missing (those students are reported as INCOMPLETE). */
+    allowIncomplete: z.boolean().default(false),
+    reason: optionalText(500),
+});
+export const unpublishSchema = z.object({ reason: requiredText(500) });
+export const marksQuery = z.object({
+    subjectComponentId: idSchema,
+    streamId: idSchema.optional(),
+    section: z.string().trim().max(10).optional(),
+});
+export const marksUpsertSchema = z.object({
+    items: z
+        .array(z.object({
+        enrollmentId: idSchema,
+        subjectComponentId: idSchema,
+        marks: z.coerce.number().min(0).max(200).nullable(),
+        status: z.enum(MARK_STATUSES),
+        /** Version the client last saw; omitted for new rows. Used for optimistic locking. */
+        version: z.number().int().min(1).optional(),
+    }))
+        .min(1)
+        .max(1000),
+});
+export const resultsQuery = z.object({
+    streamId: idSchema.optional(),
+    section: z.string().trim().max(10).optional(),
+});
+//# sourceMappingURL=exams.js.map

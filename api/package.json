@@ -1,0 +1,32 @@
+{
+  "name": "@svi/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node dist/server.js",
+    "postinstall": "prisma generate",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed:prod": "node dist/scripts/seed.js",
+    "create-admin": "node dist/scripts/createAdmin.js"
+  },
+  "dependencies": {
+    "zod": "^4.6.5",
+    "@node-rs/argon2": "^2.2.2",
+    "@prisma/client": "~6.19.3",
+    "cookie-parser": "^1.4.7",
+    "csv-parse": "^6.1.0",
+    "exceljs": "^4.4.0",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
+    "nepali-date-converter": "^3.4.0",
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
+    "prisma": "~6.19.3",
+    "puppeteer-core": "^25.12.0"
+  }
+}

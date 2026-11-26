@@ -1,0 +1,72 @@
+import { examIncludesInternal, examSheetLayout, examYears, INTERNAL_REQUIRED_EXAM_TYPES } from '../../../shared/dist/index.js';
+import { conflict, notFound } from '../../lib/errors.js';
+import { n } from '../../lib/prisma.js';
+export const toExamDto = (e) => {
+    const years = examYears(e.examYearBs, e.examYearAd, e.academicYear.name);
+    return {
+        id: e.id,
+        academicYearId: e.academicYearId,
+        academicYear: e.academicYear.name,
+        grade: e.grade,
+        name: e.name,
+        type: e.type,
+        examYearBs: e.examYearBs,
+        examYearAd: e.examYearAd,
+        effectiveYearBs: years.bs,
+        effectiveYearAd: years.ad,
+        resultDateBs: e.resultDateBs,
+        issueDateBs: e.issueDateBs,
+        status: e.status,
+        gradeScaleId: e.gradeScaleId,
+        includeInternal: examIncludesInternal(e.type, e.includeInternal),
+        sheetLayout: examSheetLayout(e.type, e.sheetLayout),
+        remarks: e.remarks,
+        publishedAt: e.publishedAt?.toISOString() ?? null,
+    };
+};
+export async function getExam(db, id) {
+    const exam = await db.exam.findUnique({ where: { id }, include: { academicYear: true } });
+    if (!exam)
+        throw notFound('Exam');
+    return exam;
+}
+export function assertStatus(exam, allowed, action) {
+    if (!allowed.includes(exam.status)) {
+        throw conflict(`Cannot ${action} while the exam is ${exam.status.replace('_', ' ').toLowerCase()}`);
+    }
+}
+/**
+ * Subject components for the exam's grade with per-exam overrides applied.
+ * Components without an override use the subject's full mark / pass percent and are included.
+ * Send-up and final exams include every component; theory-only terminal exams leave out internal ones.
+ */
+export async function effectiveComponents(db, exam) {
+    const [components, overrides] = await Promise.all([
+        db.subjectComponent.findMany({
+            where: { subject: { grade: exam.grade } },
+            include: { subject: true },
+            orderBy: [{ subject: { category: 'asc' } }, { nebCode: 'asc' }],
+        }),
+        db.examComponent.findMany({ where: { examId: exam.id } }),
+    ]);
+    const byId = new Map(overrides.map((o) => [o.subjectComponentId, o]));
+    const allRequired = INTERNAL_REQUIRED_EXAM_TYPES.includes(exam.type);
+    return components
+        .filter((c) => c.subject.isActive || byId.has(c.id))
+        .map((c) => {
+        const o = byId.get(c.id);
+        return {
+            subjectComponentId: c.id,
+            subjectId: c.subjectId,
+            subjectName: c.subject.name,
+            type: c.type,
+            nebCode: c.nebCode,
+            creditHour: n(c.creditHour),
+            fullMark: n(o?.fullMark ?? c.fullMark),
+            passPercent: n(o?.passPercent ?? c.passPercent),
+            included: allRequired || ((c.type === 'TH' || exam.includeInternal) && (o?.included ?? true)),
+            overridden: Boolean(o),
+        };
+    });
+}
+//# sourceMappingURL=exams.service.js.map

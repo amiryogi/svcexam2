@@ -1,0 +1,133 @@
+import { Router } from 'express';
+import ExcelJS from 'exceljs';
+import { z } from 'zod';
+import { formatGp, idSchema, resultsQuery } from '../../../shared/dist/index.js';
+import { ctxOf, recordAudit } from '../../lib/audit.js';
+import { notFound, parse } from '../../lib/errors.js';
+import { prisma } from '../../lib/prisma.js';
+import { renderPdf } from '../../pdf/browser.js';
+import { gradeSheetsHtml } from '../../pdf/templates/gradesheet.js';
+import { ledgerColumns, ledgerHtml, markText } from '../../pdf/templates/ledger.js';
+import { getExam, toExamDto } from '../exams/exams.service.js';
+import { gradeSheets, examResultRows } from '../results/results.service.js';
+import { getSettingsRow, logoDataUri, toSchoolInfo } from '../settings/settings.service.js';
+export const reportsRouter = Router();
+const examParams = z.object({ examId: idSchema });
+const sheetQuery = resultsQuery.extend({ enrollmentId: idSchema.optional() });
+const safeName = (s) => s.replace(/[^\w.-]+/g, '_').slice(0, 80);
+function sendFile(res, buf, mime, filename) {
+    // ?as=base64: the web app fetches reports with fetch(). Microsoft Edge recognises PDF bytes in a
+    // fetched response (whatever the Content-Type) and hands the page an empty body. Wrapping the file
+    // as base64 in JSON avoids that; the app decodes it. Direct links still get the raw file.
+    if (res.req.query.as === 'base64') {
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ filename: safeName(filename), mime, data: buf.toString('base64') });
+        return;
+    }
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName(filename)}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buf);
+}
+/**
+ * ?as=html: the web app prints report pages with the browser's print dialog ("Save as PDF"), so it
+ * asks for the page itself and the server never needs Chrome (cPanel shared hosting's process limit
+ * is too low to run it). Without it, the page is rendered to PDF here.
+ */
+const asHtml = (req) => req.query.as === 'html';
+/** Sends the report page as JSON { filename, html } when `pdf` is null, else the PDF file. */
+function sendReport(res, page, pdf, name) {
+    if (!pdf) {
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ filename: safeName(name), html: page });
+        return;
+    }
+    sendFile(res, pdf, 'application/pdf', `${name}.pdf`);
+}
+// Report URLs without a file extension: browsers / security software may intercept requests ending in .pdf.
+// The old '.pdf' / '.xlsx' paths stay for compatibility.
+reportsRouter.get(['/exams/:examId/gradesheets', '/exams/:examId/gradesheets.pdf'], async (req, res) => {
+    const { examId } = parse(examParams, req.params);
+    const q = parse(sheetQuery, req.query);
+    const exam = await getExam(prisma, examId);
+    const sheets = await gradeSheets(examId, {
+        streamId: q.streamId,
+        section: q.section,
+        enrollmentIds: q.enrollmentId ? [q.enrollmentId] : undefined,
+    });
+    if (sheets.length === 0)
+        throw notFound('Results for this selection');
+    const page = gradeSheetsHtml(sheets, await logoDataUri());
+    const pdf = asHtml(req) ? null : await renderPdf(page);
+    await recordAudit(prisma, ctxOf(req), {
+        action: 'PRINT_GRADESHEETS',
+        entity: 'exam',
+        entityId: examId,
+        after: { count: sheets.length, ...q },
+    });
+    const who = sheets.length === 1 ? sheets[0].student.fullName : `${sheets.length}-students`;
+    sendReport(res, page, pdf, `gradesheet_${exam.name}_G${exam.grade}_${who}`);
+});
+async function ledgerData(examId, q) {
+    const exam = await getExam(prisma, examId);
+    const rows = await examResultRows(examId, q);
+    if (rows.length === 0)
+        throw notFound('Students for this selection');
+    const stream = q.streamId ? (await prisma.stream.findUnique({ where: { id: q.streamId } }))?.name : undefined;
+    const subtitle = [stream, q.section && `Section ${q.section}`].filter(Boolean).join(' · ');
+    return { exam, rows, subtitle };
+}
+const ledgerPdf = async (req, res) => {
+    const { examId } = parse(examParams, req.params);
+    const q = parse(resultsQuery, req.query);
+    const { exam, rows, subtitle } = await ledgerData(examId, q);
+    const school = toSchoolInfo(await getSettingsRow());
+    const page = ledgerHtml(school, toExamDto(exam), rows, subtitle);
+    const pdf = asHtml(req) ? null : await renderPdf(page, { landscape: true });
+    sendReport(res, page, pdf, `ledger_${exam.name}_G${exam.grade}`);
+};
+const ledgerXlsx = async (req, res) => {
+    const { examId } = parse(examParams, req.params);
+    const q = parse(resultsQuery, req.query);
+    const { exam, rows, subtitle } = await ledgerData(examId, q);
+    const cols = ledgerColumns(rows);
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'SVI Exam App';
+    const ws = wb.addWorksheet('Ledger', { views: [{ state: 'frozen', xSplit: 4, ySplit: 3 }] });
+    ws.addRow([`${exam.name} · Grade ${exam.grade} · ${exam.academicYear.name}${subtitle ? ` · ${subtitle}` : ''}`]);
+    const header1 = ['Roll', 'Symbol No.', 'Reg. No.', 'Name'];
+    const header2 = ['', '', '', ''];
+    for (const c of cols) {
+        c.components.forEach((k, i) => {
+            header1.push(i === 0 ? c.name : '');
+            header2.push(`${k.type} (${k.fullMark})`);
+        });
+        header1.push('');
+        header2.push('FG');
+    }
+    header1.push('GPA', 'Result');
+    header2.push('', '');
+    ws.addRow(header1).font = { bold: true };
+    ws.addRow(header2).font = { bold: true };
+    for (const r of rows) {
+        const bySubject = new Map(r.result.subjects.map((s) => [s.subjectId, s]));
+        const cells = [r.rollNo ?? '', r.symbolNo ?? '', r.nebRegistrationNo ?? '', r.fullName];
+        for (const c of cols) {
+            const s = bySubject.get(c.subjectId);
+            for (const k of c.components) {
+                const comp = s?.components.find((x) => x.componentId === k.componentId);
+                cells.push(comp?.status === 'PRESENT' && comp.marks !== null ? comp.marks : markText(comp));
+            }
+            cells.push(s?.finalGrade ?? '');
+        }
+        cells.push(r.result.gpaWithheld ? '—' : formatGp(r.result.gpa), r.result.outcome);
+        ws.addRow(cells);
+    }
+    ws.getColumn(4).width = 28;
+    const buf = Buffer.from(await wb.xlsx.writeBuffer());
+    sendFile(res, buf, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', `ledger_${exam.name}_G${exam.grade}.xlsx`);
+};
+reportsRouter.get('/exams/:examId/ledger.pdf', ledgerPdf);
+reportsRouter.get('/exams/:examId/ledger.xlsx', ledgerXlsx);
+reportsRouter.get('/exams/:examId/ledger', (req, res, next) => req.query.format === 'xlsx' ? ledgerXlsx(req, res, next) : ledgerPdf(req, res, next));
+//# sourceMappingURL=reports.routes.js.map

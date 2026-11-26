@@ -1,0 +1,237 @@
+/**
+ * One-time import of the old Access exam database (exported to CSV by tools/import-access/export-accdb.ps1).
+ *
+ *   npm run import:access -w @svi/api -- --dir ../../tools/import-access/out \
+ *     --year 2081 --grade 11 --exam "Final" [--exam-year-bs 2081 --exam-year-ad 2024] [--publish] [--dry-run]
+ *
+ * --exam-year-bs/--exam-year-ad are optional; without them the grade sheet prints the academic year.
+ *
+ * New students get admission numbers <prefix><Access StuId>, by default SVI-<year>-0001, because
+ * every yearly Access file numbers its students from 1 again.
+ *
+ * Idempotent: students are matched by NEB registration number, then admission number (an admission
+ * number already used by a different student aborts the import); enrollments by (student, year);
+ * marks by (exam, enrollment, component). --dry-run rolls everything back at the end.
+ *
+ * Students already enrolled in the same grade in another year abort the import too: that usually
+ * means the wrong year's files were uploaded. Real repeaters are let through with --allow-repeaters.
+ *
+ * Step-by-step guide for the yearly import on the server: tools/import-access/IMPORT-GUIDE.md
+ */
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { parseArgs } from 'node:util';
+import { academicYearNameSchema, formatGp, fullName } from '../../shared/dist/index.js';
+import { prisma } from '../lib/prisma.js';
+import { computeExamResults, publishExam } from '../modules/results/results.service.js';
+import { onlyFittingStream, validateSubjectSelection } from '../modules/subjects/curriculum.logic.js';
+import { defaultGradeScaleId, loadGroupRules } from '../modules/subjects/subjects.service.js';
+import { getExam } from '../modules/exams/exams.service.js';
+import { transformAccess } from './importAccess.transform.js';
+const { values: args } = parseArgs({
+    options: {
+        dir: { type: 'string', default: '../../tools/import-access/out' },
+        year: { type: 'string' },
+        grade: { type: 'string', default: '11' },
+        exam: { type: 'string', default: 'Final' },
+        'exam-year-bs': { type: 'string' },
+        'exam-year-ad': { type: 'string' },
+        /** Default: SVI-<year>- */
+        'admission-prefix': { type: 'string' },
+        section: { type: 'string', default: 'A' },
+        publish: { type: 'boolean', default: false },
+        'dry-run': { type: 'boolean', default: false },
+        'allow-repeaters': { type: 'boolean', default: false },
+    },
+});
+class DryRunRollback extends Error {
+}
+async function main() {
+    if (!args.year) {
+        throw new Error('Required: --year <academic year, e.g. 2081>');
+    }
+    if (!academicYearNameSchema.safeParse(args.year).success) {
+        throw new Error(`--year must be a 4-digit B.S. year such as 2081 (got "${args.year}")`);
+    }
+    const grade = Number(args.grade);
+    if (grade !== 11 && grade !== 12)
+        throw new Error('--grade must be 11 or 12');
+    const dir = path.resolve(args.dir);
+    const read = (f) => readFile(path.join(dir, f), 'utf8');
+    const data = transformAccess({
+        studentDetails: await read('StudentDetails.csv'),
+        nebDetails: await read('NEB_Details.csv'),
+        subject: await read('Subject.csv'),
+        scores: await read('Scores.csv'),
+    }, args['admission-prefix'] ?? `SVI-${args.year}-`);
+    console.log(`Read ${data.students.length} students, ${data.subjects.length} subject components`);
+    const components = await prisma.subjectComponent.findMany({ where: { subject: { grade } }, include: { subject: true } });
+    const componentByCode = new Map(components.map((c) => [c.nebCode, c]));
+    const missing = data.subjects.filter((s) => !componentByCode.has(s.code));
+    if (missing.length) {
+        throw new Error(`Subjects missing in the database (run the seed or add them): ${missing.map((m) => m.code).join(', ')}`);
+    }
+    const streams = await prisma.stream.findMany();
+    const streamByName = new Map(streams.map((s) => [s.name.toLowerCase(), s]));
+    const warnings = [...data.warnings];
+    let examId = 0;
+    try {
+        await prisma.$transaction(async (tx) => {
+            // A newly created year becomes the current one when no year is current yet.
+            const hasCurrent = (await tx.academicYear.count({ where: { isCurrent: true } })) > 0;
+            const year = await tx.academicYear.upsert({
+                where: { name: args.year },
+                create: { name: args.year, isCurrent: !hasCurrent },
+                update: {},
+            });
+            const exam = await tx.exam.upsert({
+                where: { academicYearId_grade_name: { academicYearId: year.id, grade, name: args.exam } },
+                create: {
+                    academicYearId: year.id,
+                    grade,
+                    name: args.exam,
+                    type: 'FINAL',
+                    examYearBs: args['exam-year-bs'] ?? null,
+                    examYearAd: args['exam-year-ad'] ?? null,
+                    status: 'MARK_ENTRY',
+                    gradeScaleId: await defaultGradeScaleId(tx),
+                },
+                update: {},
+            });
+            if (exam.status !== 'MARK_ENTRY')
+                throw new Error(`Exam "${exam.name}" is ${exam.status}; unpublish it before re-importing`);
+            examId = exam.id;
+            const curricula = await Promise.all(streams.map(async (stream) => ({ stream, groups: await loadGroupRules(tx, stream.id, grade) })));
+            const corrections = [];
+            const enrolledElsewhere = [];
+            let markCount = 0;
+            for (const s of data.students) {
+                const accessStream = streamByName.get(s.stream.toLowerCase());
+                if (!accessStream) {
+                    warnings.push(`Student ${s.legacyId}: unknown stream "${s.stream}", skipped`);
+                    continue;
+                }
+                const studentData = {
+                    firstName: s.firstName,
+                    middleName: s.middleName,
+                    lastName: s.lastName,
+                    gender: s.gender,
+                    dobBs: s.dobBs,
+                    dobAd: s.dobAd ? new Date(s.dobAd) : null,
+                    nebRegistrationNo: s.nebRegistrationNo,
+                };
+                // Each yearly file numbers students from 1 again, so never update a different person
+                // who happens to hold the same admission number.
+                const byRegNo = s.nebRegistrationNo
+                    ? await tx.student.findUnique({ where: { nebRegistrationNo: s.nebRegistrationNo } })
+                    : null;
+                // A student found by registration number keeps their admission number; otherwise s.admissionNo is used.
+                const byAdmission = byRegNo ? null : await tx.student.findUnique({ where: { admissionNo: s.admissionNo } });
+                if (byAdmission && byAdmission.nebRegistrationNo !== s.nebRegistrationNo) {
+                    throw new Error(`Student ${s.legacyId} (${s.firstName} ${s.lastName}, reg. no. ${s.nebRegistrationNo ?? 'none'}) would get admission number ` +
+                        `${s.admissionNo}, which already belongs to ${fullName(byAdmission)} (reg. no. ${byAdmission.nebRegistrationNo ?? 'none'}). ` +
+                        'Use a different --admission-prefix.');
+                }
+                const existing = byRegNo ?? byAdmission;
+                if (existing) {
+                    const earlier = await tx.enrollment.findFirst({
+                        where: { studentId: existing.id, grade, academicYearId: { not: year.id } },
+                        include: { academicYear: true },
+                    });
+                    if (earlier) {
+                        enrolledElsewhere.push(`Student ${s.legacyId} ${fullName(existing)}: Grade ${grade} in ${earlier.academicYear.name}`);
+                    }
+                }
+                const student = existing
+                    ? await tx.student.update({ where: { id: existing.id }, data: studentData })
+                    : await tx.student.create({ data: { admissionNo: s.admissionNo, ...studentData } });
+                const subjectIds = [...new Set(s.scores.map((sc) => componentByCode.get(sc.thCode).subjectId))];
+                let stream = accessStream;
+                let problems = validateSubjectSelection(curricula.find((c) => c.stream.id === stream.id).groups, subjectIds);
+                // Access files often record the wrong stream; the subjects registered with NEB decide.
+                const fitting = problems.length ? onlyFittingStream(curricula, subjectIds) : null;
+                if (fitting) {
+                    corrections.push(`Student ${s.legacyId}: stream ${accessStream.name} → ${fitting.name} (matches the subjects)`);
+                    stream = fitting;
+                    problems = [];
+                }
+                problems.forEach((p) => warnings.push(`Student ${s.legacyId}: ${p}`));
+                const enrollment = await tx.enrollment.upsert({
+                    where: { studentId_academicYearId: { studentId: student.id, academicYearId: year.id } },
+                    create: {
+                        studentId: student.id,
+                        academicYearId: year.id,
+                        grade,
+                        streamId: stream.id,
+                        section: args.section,
+                        rollNo: s.legacyId,
+                        symbolNo: s.symbolNo,
+                    },
+                    update: { streamId: stream.id, symbolNo: s.symbolNo },
+                });
+                await tx.enrollmentSubject.deleteMany({ where: { enrollmentId: enrollment.id } });
+                await tx.enrollmentSubject.createMany({ data: subjectIds.map((subjectId) => ({ enrollmentId: enrollment.id, subjectId })) });
+                for (const sc of s.scores) {
+                    for (const [code, value] of [[sc.thCode, sc.thMarks], [sc.inCode, sc.inMarks]]) {
+                        const c = componentByCode.get(code);
+                        if (value !== null && value > Number(c.fullMark)) {
+                            warnings.push(`Student ${s.legacyId}: ${code} marks ${value} > full mark, skipped`);
+                            continue;
+                        }
+                        await tx.mark.upsert({
+                            where: { examId_enrollmentId_subjectComponentId: { examId: exam.id, enrollmentId: enrollment.id, subjectComponentId: c.id } },
+                            create: { examId: exam.id, enrollmentId: enrollment.id, subjectComponentId: c.id, marks: value },
+                            update: { marks: value, status: 'PRESENT', version: { increment: 1 } },
+                        });
+                        markCount++;
+                    }
+                }
+            }
+            if (enrolledElsewhere.length && !args['allow-repeaters']) {
+                throw new Error(`${enrolledElsewhere.length} student(s) in these files are already enrolled in Grade ${grade} in another year, ` +
+                    `e.g.\n${enrolledElsewhere.slice(0, 10).map((e) => `    ${e}`).join('\n')}\n` +
+                    `  Are these the right files for ${year.name}? Nothing was saved. If these students really repeated ` +
+                    'the grade, run the import again with --allow-repeaters.');
+            }
+            console.log(`Imported ${data.students.length} students, ${markCount} marks into "${exam.name}" (${year.name}, Grade ${grade})`);
+            if (enrolledElsewhere.length) {
+                console.log(`Repeating Grade ${grade} (enrolled in another year too): ${enrolledElsewhere.length}`);
+                enrolledElsewhere.forEach((e) => console.log(`  - ${e}`));
+            }
+            if (corrections.length) {
+                console.log(`Stream corrected for ${corrections.length} student(s):`);
+                corrections.forEach((c) => console.log(`  - ${c}`));
+            }
+            // Spot-check results against the old Access grade sheets.
+            const results = await computeExamResults(tx, await getExam(tx, exam.id));
+            const summary = { PASS: 0, NG: 0, INCOMPLETE: 0 };
+            results.forEach((r) => summary[r.result.outcome]++);
+            console.log('Outcomes:', summary);
+            for (const r of results.slice(0, 5)) {
+                console.log(`  ${r.rollNo} ${r.fullName.padEnd(28)} GPA ${r.result.gpaWithheld ? 'withheld' : formatGp(r.result.gpa)} ${r.result.outcome}`);
+            }
+            if (args['dry-run'])
+                throw new DryRunRollback();
+        }, { timeout: 300_000, maxWait: 10_000 });
+    }
+    catch (e) {
+        if (!(e instanceof DryRunRollback))
+            throw e;
+        console.log('Dry run: all changes rolled back.');
+    }
+    if (warnings.length) {
+        console.log(`\n${warnings.length} warning(s):`);
+        warnings.forEach((w) => console.log(`  - ${w}`));
+    }
+    if (args.publish && !args['dry-run']) {
+        const r = await publishExam(examId, false, 'Imported from Access', { userId: null, ip: null });
+        console.log(`Published ${r.published} grade sheets.`);
+    }
+}
+main()
+    .catch((e) => {
+    console.error(`✗ ${e.message}`);
+    process.exitCode = 1;
+})
+    .finally(() => prisma.$disconnect());
+//# sourceMappingURL=importAccess.js.map
