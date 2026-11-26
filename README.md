@@ -91,7 +91,7 @@ Each academic year's results live in their own Access file (e.g. `Final Exam XI 
 3. In File Manager, create `svi-import` in the home folder (**not** in `public_html`), empty it if it already exists, then upload and extract `svi-import.zip` into it.
 4. In Terminal, run the dry run. It imports everything inside a transaction, prints a summary, then rolls back:
    ```bash
-   source /home/<cpuser>/nodevenv/svi-api/24/bin/activate && cd /home/<cpuser>/svi-api
+   source /home/<cpuser>/nodevenv/svi-api/22/bin/activate && cd /home/<cpuser>/svi-api
    node dist/scripts/importAccess.js --dir /home/<cpuser>/svi-import --year 2081 --grade 11 --exam Final --dry-run
    ```
    If the summary looks right, run the same command without `--dry-run`.
@@ -145,7 +145,7 @@ Marks are saved through the same code as mark entry in the app, and each change 
 On the server, after uploading the deploy zip and the workbook (e.g. to `/home/<cpuser>/svi-import`):
 
 ```bash
-source /home/<cpuser>/nodevenv/svi-api/24/bin/activate && cd /home/<cpuser>/svi-api
+source /home/<cpuser>/nodevenv/svi-api/22/bin/activate && cd /home/<cpuser>/svi-api
 node dist/scripts/importMarks.js --file "/home/<cpuser>/svi-import/First Term 2083.xlsx" --year 2083 --exam "First Term" --create-students
 # read the report, then save:
 node dist/scripts/importMarks.js --file "…" --year 2083 --exam "First Term" --create-students --user <your username> --commit
@@ -181,13 +181,29 @@ Without `--commit` nothing is saved. `--parse-only` checks just the workbook, wi
 
 ## Deployment (cPanel shared hosting)
 
-Both parts run on the same cPanel account (here NestNepal), each on its own subdomain:
+Both parts run on the same cPanel account (here NestNepal, on its WebPro server since November 2026), each on its own subdomain:
 - **API:** a Node app (**Setup Node.js App**) at `https://api.nevanhandicraft.com.np`.
 - **Web app:** static files at `https://svc.nevanhandicraft.com.np`.
 
 The browser calls the API directly. The API allows exactly the web app's address (`APP_ORIGIN`) with CORS ([apps/api/src/middleware/cors.ts](apps/api/src/middleware/cors.ts)). Both subdomains are on the same *site*, so the `SameSite=Strict` session cookie, the CSRF check and the logo images all keep working.
 
 The web app used to run on Vercel, which forwarded `/api/*` to the API ([apps/web/vercel.json](apps/web/vercel.json), now unused). The host's Imunify360 firewall kept blocking requests coming from Vercel's servers, so the web app moved to the same hosting.
+
+### Deploying with Git (current method)
+
+Nothing is built on the server. `npm run deploy:git` builds the API bundle and the web app on your PC (the same output as the zips described below), commits them to the `deploy` branch of this repository and pushes it. On the server, cPanel's **Git Version Control** holds a clone of that branch, and its `.cpanel.yml` (generated from [scripts/cpanel.yml](scripts/cpanel.yml)) copies `api/` into `~/svi-api`, runs `npm install`, `npx prisma generate` and `npx prisma migrate deploy` inside the app's Node environment, restarts Passenger through `tmp/restart.txt`, and copies `web/` into the web subdomain's document root.
+
+**First time on a server** (the Node app must exist before the first deploy, because `.cpanel.yml` uses its `nodevenv`):
+
+1. Create the API subdomain, the database and `~/svi-storage` as in steps 2–4 of "API (cPanel)" below, and the web subdomain as in step 2 of "Web app". Its document root must match `--web-root` (default `svc.nevanhandicraft.com.np`).
+2. *Setup Node.js App → Create Application* with the settings and environment variables of step 5 of "API (cPanel)". Skip **Run NPM Install**.
+3. On your PC: `npm run deploy:git`. Options: `--api-origin`, `--home` (default `/home2/nevanhan`, the account's home directory on WebPro: `echo $HOME` in Terminal shows it), `--node` (default `22`, the Node version chosen in step 2), `--web-root`, and `--no-push` to only commit locally.
+4. cPanel → *Git Version Control* → **Create**: turn on *Clone a Repository*, clone URL `https://github.com/amiryogi/svcexam2.git`, repository path `<home>/repositories/svcexam2` (on WebPro `/home2/nevanhan/repositories/svcexam2`). Then *Manage → Basic Information*: set the checked-out branch to `deploy` and save. On *Pull or Deploy*, click **Deploy HEAD Commit** and read the log: it should end with `prisma migrate deploy` and the restart.
+5. For a new installation, finish with `npm run db:seed:prod` and `npm run create-admin` in Terminal (step 6 of "API (cPanel)"). Check `https://api.nevanhandicraft.com.np/api/v1/health`.
+
+**Every update:** `npm run deploy:git`, then in cPanel → *Git Version Control → Manage → Pull or Deploy*: **Update from Remote**, then **Deploy HEAD Commit**. If the app does not pick up the change, click **Restart** in *Setup Node.js App*. The script prints "Nothing changed" and makes no commit when the build is identical to the last deploy.
+
+The zip steps below are the fallback when Git Version Control is not available.
 
 ### API (cPanel)
 
@@ -196,7 +212,7 @@ The web app used to run on Vercel, which forwarded `/api/*` to the API ([apps/we
 3. **Database:** in *MySQL Databases*, create a database and a user, and add the user to the database with ALL PRIVILEGES. The real names carry your cPanel prefix, e.g. `cpuser_svi`.
 4. **Upload:** in *File Manager*, create `/home/<cpuser>/svi-api` (outside `public_html`), upload `svi-api.zip` there and extract it. Also create `/home/<cpuser>/svi-storage`, where uploaded logos are stored.
 5. **Setup Node.js App → Create Application:**
-   - Node.js version: **22** or newer
+   - Node.js version: the newest **22.x** the host offers (puppeteer-core needs 22.12 or newer)
    - Application mode: Production
    - Application root: `svi-api`
    - Application URL: `api.nevanhandicraft.com.np`
@@ -214,6 +230,7 @@ The web app used to run on Vercel, which forwarded `/api/*` to the API ([apps/we
 
 6. Click **Run NPM Install**. Then open **Terminal**, paste the `source …/activate && cd …` command shown at the top of the app page, and run:
    ```bash
+   npx prisma generate
    npx prisma migrate deploy
    npm run db:seed:prod
    npm run create-admin
@@ -246,13 +263,25 @@ Logins only work on the address in `APP_ORIGIN`; the API refuses every other ori
 
 ### Updating
 
+With Git Version Control, see "Deploying with Git" above. By zip:
+
 - **Web:** run `npm run build:web-deploy`, then in File Manager delete the old `assets` folder in the web app's document root, upload `svi-web.zip` and extract it, overwriting. No restart is needed. Pushing to Git no longer deploys the web app.
 - **API:**
   1. Run `npm run build:deploy` on your computer (stop `npm run dev:api` first; on Windows it locks a Prisma file and the build fails with `EPERM`).
   2. Upload `svi-api.zip` and extract it over `svi-api` (this overwrites `dist/` and `prisma/`).
-  3. Click **Run NPM Install** if dependencies changed **or `prisma/schema.prisma` changed** (any update with a new migration). It regenerates the server's Prisma client; without it the API starts but crashes on the new tables. Running `npx prisma generate` in Terminal does the same.
+  3. Click **Run NPM Install** if dependencies changed. Then run `npx prisma generate` in Terminal if dependencies **or `prisma/schema.prisma`** changed (any update with a new migration). The bundle has no postinstall (on this hosting npm would run it outside the app folder, where it fails), and without a regenerated Prisma client the API starts but crashes on the new tables.
   4. Run `npx prisma migrate deploy` in Terminal if there are new migrations.
   5. Click **Restart**.
+
+### Moving to another cPanel server
+
+When the host moves the account to a new server (November 2026: Cloud Babal → WebPro), the transfer copies the home folder, the subdomains, their certificates and the MySQL database, but **not** the Node.js application: the *Setup Node.js App* entry, `~/nodevenv/` and the Passenger block in the API subdomain's `.htaccess` are server-specific, and the Node version may differ (WebPro offers 22.x; Cloud Babal had 24). On the new server:
+
+1. Take safety copies from the old server first: phpMyAdmin → Export of the database, a zip of `svi-storage`, and the app's environment variables (`DATABASE_URL` holds the database password). Compare `SELECT COUNT(*), MAX(updated_at) FROM marks` on both servers; if the old one is newer, import the dump on the new one before anyone signs in.
+2. Delete the copied `~/nodevenv/svi-api` and `svi-api/node_modules`, and remove the `CLOUDLINUX PASSENGER CONFIGURATION` block from the `.htaccess` in the API subdomain's document root.
+3. Create the Node app again as in "API (cPanel)" above, with the same environment variables, but skip Run NPM Install. Then deploy with Git as in "Deploying with Git": `npm run deploy:git` on the PC, clone the repository in *Git Version Control*, check out `deploy`, **Deploy HEAD Commit**. No seed and no create-admin: the data is already there.
+4. In *Zone Editor*, point the `api` and `svc` A records at the new server's IP. The host's transfer only changed the main domain's record, so the subdomains kept answering from the old server.
+5. Check `/api/v1/health`, sign in, and the Audit page IP (see "Checks after the first deploy").
 
 ## Security summary
 

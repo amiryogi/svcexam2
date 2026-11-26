@@ -62,7 +62,7 @@ Read the output:
 
 **5. Upload the zip**
 
-1. cPanel → **File Manager** → your home folder (`/home/nevanhan`, the same level as `svi-api`).
+1. cPanel → **File Manager** → your home folder (`/home2/nevanhan`, the same level as `svi-api`).
 2. Open the **`svi-import`** folder. If it doesn't exist, click **+ Folder** and create it.
 3. If there are files inside, **Select All** → **Delete**. The folder must be empty.
 4. Click **Upload** and choose `D:\svcexam\svcexam2\tools\import-access\out\svi-import.zip`.
@@ -72,12 +72,12 @@ Read the output:
 
 cPanel → **Terminal**, then run:
 ```bash
-source /home/nevanhan/nodevenv/svi-api/24/bin/activate && cd /home/nevanhan/svi-api
+source /home2/nevanhan/nodevenv/svi-api/22/bin/activate && cd /home2/nevanhan/svi-api
 ```
 
 **7. Make sure it's the right file**
 ```bash
-wc -l /home/nevanhan/svi-import/StudentDetails.csv
+wc -l /home2/nevanhan/svi-import/StudentDetails.csv
 ```
 The number must be **your student count + 1** (the extra line is the header row). If it isn't, the old files are still there: go back to step 5.
 
@@ -85,7 +85,7 @@ The number must be **your student count + 1** (the extra line is the header row)
 
 Change `--year` (and `--grade 12` for a Grade XII file):
 ```bash
-node dist/scripts/importAccess.js --dir /home/nevanhan/svi-import --year 2081 --grade 11 --exam Final --dry-run
+node dist/scripts/importAccess.js --dir /home2/nevanhan/svi-import --year 2081 --grade 11 --exam Final --dry-run
 ```
 Read the output:
 
@@ -104,7 +104,7 @@ If you get an error instead, see **Troubleshooting** below.
 
 Run the same command **without** `--dry-run`:
 ```bash
-node dist/scripts/importAccess.js --dir /home/nevanhan/svi-import --year 2081 --grade 11 --exam Final
+node dist/scripts/importAccess.js --dir /home2/nevanhan/svi-import --year 2081 --grade 11 --exam Final
 ```
 It prints the same lines, without "Dry run: all changes rolled back". If anything fails, nothing is saved, and you can simply run it again once the problem is fixed.
 
@@ -155,7 +155,7 @@ Print a few grade sheets and compare them line by line with the paper ones: code
 | `Subjects missing in the database: …` | The file uses a subject code the app doesn't have yet. Add the subject under **Setup → Subjects**, or ask your developer. |
 | `Exam "Final" is PUBLISHED; unpublish it before re-importing` | That exam was already imported and published. Only re-import if you mean to replace it: open the exam, **Unpublish** (give a reason), then run the import again. |
 | Student count or names in the dry run belong to another year | Old files are still in `svi-import`. Redo step 5. |
-| `Cannot find module` / `dist/scripts/importAccess.js` not found | The API files on the server are incomplete. Upload and extract `svi-api.zip` again (see below). |
+| `Cannot find module` / `dist/scripts/importAccess.js` not found | The API files on the server are incomplete. Deploy the app again (see below). |
 
 **Running the import again is safe** until you publish. It updates the same students, enrollments and marks instead of creating duplicates.
 
@@ -165,7 +165,7 @@ Print a few grade sheets and compare them line by line with the paper ones: code
 
 This is **not** needed for every import, only when your developer tells you the API changed.
 
-1. On this PC: `npm run build:deploy`. This creates `D:\svcexam\svcexam2\deploy\svi-api.zip`.
-2. File Manager → `svi-api` → upload that zip → **Extract**, and overwrite if asked.
-3. If your developer says there are database changes: in Terminal (step 6), run `npx prisma migrate deploy`, then `npx prisma generate`.
-4. **Setup Node.js App** → **Restart** `svi-api`, then check that `https://api.nevanhandicraft.com.np/api/v1/health` shows `{"status":"ok"}`.
+1. On this PC: `npm run deploy:git`. It builds the app and pushes it to the `deploy` branch on GitHub.
+2. cPanel → **Git Version Control** → **Manage** → *Pull or Deploy* → **Update from Remote**, then **Deploy HEAD Commit**. The log shows the files being copied, dependencies installed, database changes applied and the app restarted.
+3. Check that `https://api.nevanhandicraft.com.np/api/v1/health` shows `{"status":"ok"}`. If it does not, **Setup Node.js App** → **Restart** `svi-api` and check again.
+4. Fallback without Git Version Control: `npm run build:deploy` on this PC, upload and extract `deploy/svi-api.zip` over `svi-api`, run `npx prisma migrate deploy` and `npx prisma generate` in Terminal (step 6), then Restart.
