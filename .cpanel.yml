@@ -10,9 +10,10 @@ deployment:
     # API code: replace the built folders, keep node_modules, tmp and anything else in the app root.
     - /bin/rm -rf $API_DIR/dist $API_DIR/prisma $API_DIR/shared
     - /bin/cp -R api/. $API_DIR/
-    # Dependencies (postinstall runs prisma generate) and migrations, inside the app's Node environment.
+    # Dependencies, the Prisma client and migrations, inside the app's Node environment. prisma generate
+    # is run here from the app root: an npm postinstall would run in ~/nodevenv, without the schema.
     # npm install, not npm ci: node_modules in a cPanel Node app is a symlink into ~/nodevenv.
-    - . /home2/nevanhan/nodevenv/svi-api/22/bin/activate && cd $API_DIR && npm install --no-audit --no-fund && npx prisma migrate deploy
+    - . /home2/nevanhan/nodevenv/svi-api/22/bin/activate && cd $API_DIR && npm install --no-audit --no-fund && npx prisma generate && npx prisma migrate deploy
     # Passenger restarts the app when tmp/restart.txt changes.
     - /bin/mkdir -p $API_DIR/tmp && /bin/touch $API_DIR/tmp/restart.txt
     # Web app: hashed assets are replaced, the rest overwritten (index.html, .htaccess files, favicon).
