@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hookform/resolvers": "^5.9.1",
+    "@hookform/resolvers": "^5.9.2",
     "@svi/shared": "*",
     "@tanstack/react-query": "^5.104.1",
     "clsx": "^2.1.1",
