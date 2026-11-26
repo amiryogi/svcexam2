@@ -1,7 +1,8 @@
 ---
 # Template for the .cpanel.yml at the root of the `deploy` branch. scripts/build-deploy-branch.mjs
-# fills /home/nevanhan, 22 and svc.nevanhandicraft.com.np. cPanel's Git Version Control runs these tasks, in order
-# and in one shell, from the repository root when you click "Deploy HEAD Commit".
+# fills in the home directory, the Node version and the web document root. cPanel's Git Version
+# Control runs these tasks, in order and in one shell, from the repository root when you click
+# "Deploy HEAD Commit".
 deployment:
   tasks:
     - export API_DIR=/home/nevanhan/svi-api
