@@ -4,22 +4,27 @@
 # Control runs these tasks, in order and in one shell, from the repository root when you click
 # "Deploy HEAD Commit". One shell means exported variables carry over to later tasks, and so would a
 # `cd`: every path below is therefore absolute, and the task that needs a `cd` runs in a subshell.
+# cPanel stops the deployment at the first task that fails.
 deployment:
   tasks:
     - export REPO_DIR=$PWD
     - export API_DIR=/home2/nevanhan/svi-api
     - export WEB_DIR=/home2/nevanhan/svc.nevanhandicraft.com.np
+    # Web app first: it is only a file copy, so a failure in the API tasks below cannot hold it back.
+    # Hashed assets are replaced, the rest overwritten (index.html, .htaccess files, favicon). One chain
+    # that copies the new assets next to the old ones before it deletes anything, so a failed copy
+    # leaves the live site as it was.
+    - /bin/rm -rf $WEB_DIR/assets.new && /bin/cp -R $REPO_DIR/web/assets $WEB_DIR/assets.new && /bin/rm -rf $WEB_DIR/assets && /bin/mv $WEB_DIR/assets.new $WEB_DIR/assets && /bin/cp -R $REPO_DIR/web/. $WEB_DIR/
     # API code: replace the built folders, keep node_modules, tmp and anything else in the app root.
     - /bin/rm -rf $API_DIR/dist $API_DIR/prisma $API_DIR/shared
     - /bin/cp -R $REPO_DIR/api/. $API_DIR/
     # Dependencies, the Prisma client and migrations, inside the app's Node environment. prisma generate
     # is run here from the app root: an npm postinstall would run in ~/nodevenv, without the schema.
     # npm install, not npm ci: node_modules in a cPanel Node app is a symlink into ~/nodevenv.
+    # NODE_OPTIONS: the Prisma CLI loads WebAssembly, for which Node reserves about 10 GB of address
+    # space unless the trap handler is off. The hosting's memory limit refuses that, and prisma dies
+    # with "Cannot allocate Wasm memory for new instance".
     # In a subshell, so the cd and the activated environment end with this task.
-    - (. /home2/nevanhan/nodevenv/svi-api/22/bin/activate && cd $API_DIR && npm install --no-audit --no-fund && npx prisma generate && npx prisma migrate deploy)
+    - (. /home2/nevanhan/nodevenv/svi-api/22/bin/activate && cd $API_DIR && export NODE_OPTIONS=--disable-wasm-trap-handler && npm install --no-audit --no-fund && npx prisma generate && npx prisma migrate deploy)
     # Passenger restarts the app when tmp/restart.txt changes.
     - /bin/mkdir -p $API_DIR/tmp && /bin/touch $API_DIR/tmp/restart.txt
-    # Web app: hashed assets are replaced, the rest overwritten (index.html, .htaccess files, favicon).
-    # One chain that copies the new assets next to the old ones before it deletes anything, so a failed
-    # copy leaves the live site as it was (a bare `rm` here once left the site without its assets).
-    - /bin/rm -rf $WEB_DIR/assets.new && /bin/cp -R $REPO_DIR/web/assets $WEB_DIR/assets.new && /bin/rm -rf $WEB_DIR/assets && /bin/mv $WEB_DIR/assets.new $WEB_DIR/assets && /bin/cp -R $REPO_DIR/web/. $WEB_DIR/
